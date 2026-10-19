@@ -1,0 +1,186 @@
+schema = 1
+preset = "mimocode"
+harness_version = "main @ b53297d8e6f1 (latest release v0.1.15)"
+verified_on = "2026-10-18"
+completeness = "partial"
+severity = "warning"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://github.com/XiaomiMiMo/MiMo-Code/blob/b53297d8e6f01d3cfeecb75eac59b542869901e7/packages/cli/src/command/index.ts"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s2"
+url = "https://github.com/XiaomiMiMo/MiMo-Code/tree/b53297d8e6f01d3cfeecb75eac59b542869901e7/packages/cli/src/cli/cmd/tui"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s3"
+url = "https://github.com/XiaomiMiMo/MiMo-Code/tree/b53297d8e6f01d3cfeecb75eac59b542869901e7/packages/cli/src/skill/builtin/.bundle"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s4"
+url = "https://github.com/XiaomiMiMo/MiMo-Code/blob/b53297d8e6f01d3cfeecb75eac59b542869901e7/packages/cli/src/agent/agent.ts"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s5"
+url = "https://github.com/XiaomiMiMo/MiMo-Code/blob/b53297d8e6f01d3cfeecb75eac59b542869901e7/packages/cli/src/command/index.ts"
+quote = "for (const [name, command] of Object.entries(cfg.command ?? {})) { commands[name] = {"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s6"
+url = "https://github.com/XiaomiMiMo/MiMo-Code/blob/b53297d8e6f01d3cfeecb75eac59b542869901e7/packages/cli/src/skill/index.ts"
+quote = "User overrides always win: bundled must not overwrite non-bundled"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s7"
+url = "https://github.com/XiaomiMiMo/MiMo-Code/blob/b53297d8e6f01d3cfeecb75eac59b542869901e7/packages/cli/src/agent/agent.ts"
+quote = "item.prompt = value.prompt ?? item.prompt"
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+evidence = "s5"
+user_collision = "user_wins"
+match = "exact"
+names = ["deep-research", "distill", "dream", "goal", "init", "loops", "rebuild", "review"]
+
+[[group]]
+kind = "command"
+source = "s2"
+user_collision = "unknown"
+match = "exact"
+names = [
+  "agents",
+  "background",
+  "btw",
+  "compact",
+  "connect",
+  "context-limit",
+  "copy",
+  "dark",
+  "doc",
+  "editor",
+  "exit",
+  "export",
+  "force-agent",
+  "fork",
+  "help",
+  "language",
+  "light",
+  "login",
+  "logo",
+  "logout",
+  "mcps",
+  "modalities",
+  "models",
+  "never-ask",
+  "new",
+  "org",
+  "permission-timeout",
+  "recover",
+  "redo",
+  "rename",
+  "sessions",
+  "share",
+  "skills",
+  "skip-permissions",
+  "status",
+  "themes",
+  "thinking",
+  "timeline",
+  "timestamps",
+  "undo",
+  "unshare",
+  "variants",
+  "vivid",
+  "voice",
+  "voice-control",
+  "voice-send",
+  "workflows",
+  "worktree",
+]
+aliases = { "compact" = [
+  "summarize",
+], "doc" = [
+  "docs",
+], "exit" = [
+  "q",
+  "quit",
+], "language" = [
+  "lang",
+], "new" = [
+  "clear",
+], "org" = [
+  "orgs",
+  "switch-org",
+], "sessions" = [
+  "continue",
+  "resume",
+], "thinking" = [
+  "toggle-thinking",
+], "timestamps" = [
+  "toggle-timestamps",
+], "worktree" = [
+  "wt",
+] }
+
+[[group]]
+kind = "skill"
+source = "s3"
+evidence = "s6"
+user_collision = "user_wins"
+match = "exact"
+names = [
+  "arxiv",
+  "claude-code",
+  "codex",
+  "compose-next",
+  "data-analytics",
+  "deep-research",
+  "docx-official",
+  "grok-build",
+  "html-to-video-pipeline",
+  "learn-everything",
+  "loop",
+  "mate",
+  "memory-search",
+  "mimocode-docs",
+  "modern-python-toolchain",
+  "pdf-official",
+  "playwright",
+  "pptx-official",
+  "product-design",
+  "research-paper-writing",
+  "sales",
+  "skill-creator",
+  "super-research",
+  "xlsx-official",
+]
+
+[[group]]
+kind = "agent"
+source = "s4"
+evidence = "s7"
+user_collision = "user_wins"
+match = "exact"
+names = [
+  "build",
+  "checkpoint-writer",
+  "compaction",
+  "distill",
+  "dream",
+  "explore",
+  "general",
+  "plan",
+  "summary",
+  "title",
+]

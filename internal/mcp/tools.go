@@ -32,6 +32,17 @@ func readOnlyAnnotations() *sdkmcp.ToolAnnotations {
 	}
 }
 
+// openWorldAnnotations marks a read-only tool that sends data to an external service (a model
+// provider) and spends money: the project tree is not written, but the world is reached.
+func openWorldAnnotations() *sdkmcp.ToolAnnotations {
+	return &sdkmcp.ToolAnnotations{
+		ReadOnlyHint:    true,
+		DestructiveHint: boolPtr(false),
+		IdempotentHint:  false,
+		OpenWorldHint:   boolPtr(true),
+	}
+}
+
 // destructiveAnnotations returns tool annotations marking a tool as destructive.
 func destructiveAnnotations() *sdkmcp.ToolAnnotations {
 	return &sdkmcp.ToolAnnotations{
@@ -60,10 +71,16 @@ func idempotentAnnotations() *sdkmcp.ToolAnnotations {
 	}
 }
 
-var priorityValues = []string{"critical", "high", "medium", "low", "minimal"}
+const (
+	levelHigh = "high"
+	levelLow  = "low"
+	levelMid  = "medium"
+)
+
+var priorityValues = []string{"critical", levelHigh, levelMid, levelLow, "minimal"}
 
 // severityValues are the severity levels a check takes.
-var severityValues = []string{"low", "medium", "high", "critical"}
+var severityValues = []string{levelLow, levelMid, levelHigh, "critical"}
 
 // mergeStrategyError is the include merge strategy that fails on a conflict.
 const mergeStrategyError = "error"
@@ -111,6 +128,13 @@ func (s *Server) registerProjectTools() {
 		enums: map[string][]string{"fail_on": failOnValues(), "lint_profile": lint.ProfileNames()},
 	}, handlers.ScanContentWith(s.validator))
 
+	addTool[judgeIn](s, toolSpec{
+		name: "judge", title: "Judge Agent Configuration",
+		description: "Review the project's agent configuration (skills, agents, commands, rules, CLAUDE.md and AGENTS.md files, MCP and settings files) with the user's language models, as `ai-rulez judge` does: security, quality and governance reviewers whose findings must quote the file, a verifier, an adjudicator and scores computed in code. SENDS FILE CONTENT TO THE USER'S MODEL PROVIDER AND SPENDS MONEY: it runs only with allow_llm true when the user config also allows it; with estimate true it sends nothing. Models, provider and spend caps come from the user's config, never from this call. Findings that meet fail_on, or a partly reviewed unit, make the result an error carrying the report.",
+		annotations: openWorldAnnotations(), output: judgeOut{},
+		enums: map[string][]string{"min_confidence": {levelLow, levelMid, levelHigh}},
+	}, handlers.JudgeWith(s.judger))
+
 	addTool[doctorIn](s, toolSpec{
 		name: "doctor", title: "Run Diagnostics",
 		description: "Run read-only diagnostics: config validity, preset names, generated-output drift, gitignore coverage, shared settings documents, MCP env placeholders, hook scripts, lock file, and tool binaries. Returns findings by severity (error, warning, info).",
@@ -129,7 +153,7 @@ func (s *Server) registerProjectTools() {
 	addTool[initIn](s, toolSpec{
 		name: "init_project", title: "Initialize Project",
 		description: "Initialize a new ai-rulez project in the current directory. Refuses to overwrite an existing configuration.",
-		annotations: additiveAnnotations(), output: initOut{},
+		annotations: additiveAnnotations(), output: initOut{}, initializes: true,
 	}, handlers.InitProjectHandler)
 }
 
@@ -279,19 +303,20 @@ func (s *Server) registerCRUDContextTools() {
 func (s *Server) registerCRUDSkillTools() {
 	addTool[skillCreateIn](s, toolSpec{
 		name: "create_skill", title: "Create Skill",
-		description: "Create a new skill file with optional YAML frontmatter",
+		description: "Create a new skill file with optional YAML frontmatter. With scope (and allow_write) it writes the skill into the repository for a harness working in that directory, <scope>/<harness skills dir>/<name>/SKILL.md, after a security scan; that file is the harness's own, not ai-rulez content.",
 		annotations: additiveAnnotations(), output: mutationOut{}, enums: enumsOf("priority", priorityValues),
-	}, handlers.CreateSkillHandler)
+	}, s.scopedSkillHandler(true, handlers.CreateSkillHandler))
 
 	addTool[contentRefIn](s, toolSpec{
 		name: "read_skill", title: "Read Skill", description: "Read the content of a skill file",
 		annotations: readOnlyAnnotations(), output: readOut{}, readsConfig: true,
 	}, handlers.ReadSkillHandler)
 
-	addTool[contentUpdateIn](s, toolSpec{
-		name: "update_skill", title: "Update Skill", description: "Update an existing skill file atomically",
-		annotations: idempotentAnnotations(), output: mutationOut{}, enums: enumsOf("priority", priorityValues),
-	}, handlers.UpdateSkillHandler)
+	addTool[skillUpdateIn](s, toolSpec{
+		name: "update_skill", title: "Update Skill",
+		description: "Update an existing skill file atomically. With scope (and allow_write) it replaces the harness's skill file <scope>/<harness skills dir>/<name>/SKILL.md after a security scan; generated copies are refused.",
+		annotations: destructiveAnnotations(), output: mutationOut{}, enums: enumsOf("priority", priorityValues),
+	}, s.scopedSkillHandler(false, handlers.UpdateSkillHandler))
 
 	addTool[contentRefIn](s, toolSpec{
 		name: "delete_skill", title: "Delete Skill", description: "Delete a skill file",
@@ -453,7 +478,7 @@ func (s *Server) registerGovernanceTools() {
 		name: "lock_status", title: "Lock Status",
 		description: "Compare ai-rulez.lock with the sources, outputs, skill sources and served skills, without fetching anything (lock --check --format json). Read-only, offline; lock and update stay CLI-only. A project with no lock file is an error, as in the CLI.",
 		annotations: readOnlyAnnotations(), output: lockStatusOut{},
-		enums: map[string][]string{"kind": govview.LockKinds},
+		enums: map[string][]string{keyKind: govview.LockKinds},
 	}, handlers.LockStatusHandler(s.version, func(ctx context.Context, cfg *config.Config, lock *lockfile.File, views []handlers.LockView) []contentlock.Change {
 		extras := make([]ServeSetup, 0, len(views))
 		for _, v := range views {

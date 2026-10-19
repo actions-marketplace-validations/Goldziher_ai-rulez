@@ -34,16 +34,40 @@ type contentScanner struct {
 	// root is non-empty for the project's own content: the root of v's workspace.
 	root     string
 	problems []ContentProblem
+	// quietUnrecognized leaves out the warning about skill subdirectories generate would not
+	// copy: a scan that generates nothing (lint of hand-written content) has no output to lose.
+	quietUnrecognized bool
+	// extraResources are the `resources` patterns of an installed skill entry: files
+	// outside references/, scripts/ and assets/ that are bundled too.
+	extraResources []string
+	// explicitResources is true when extraResources came from the entry's
+	// `resources`, not from the default: the author then chose what is left out.
+	explicitResources bool
+	// bundledFiles and bundledBytes count what one installed skill has bundled so far.
+	bundledFiles, bundledBytes int
+	// budget, when set, is the running total of the whole installed_skills entry.
+	budget *skillBundleBudget
 	// git answers which files a work tree ignores (bundle filtering); the zero
 	// value runs real git.
 	git gitutil.Git
 	// snapshots shares git's answers among the items of one directory.
 	snapshots bundleSnapshots
+	// shared, when set, replaces snapshots: one set of git answers for every
+	// scanner built from the same context (see WithBundleSnapshots).
+	shared *bundleSnapshots
 	// log receives what the scan reports. nil: refusals are only recorded, never
 	// printed (see refuse). A host that injected a logger gets everything there.
 	log logger.Logger
 	// ctx bounds the git questions the scan asks.
 	ctx context.Context
+}
+
+// bundleSnaps is the snapshots the scanner asks git through.
+func (s *contentScanner) bundleSnaps() *bundleSnapshots {
+	if s.shared != nil {
+		return s.shared
+	}
+	return &s.snapshots
 }
 
 // logger is the scanner's log, the CLI's when none was injected.
@@ -67,12 +91,12 @@ func newIncludeScanner(ctx context.Context, v workspace.View) *contentScanner {
 // library user without a host gets no output on a stream it never chose, and finds
 // the refusals of the project's own content in Config.ContentProblems (the command
 // line prints those itself). A host logger gets every refusal. A refusal of
-// included content is reported at error level, which --quiet does not hide, as the
-// refusals of the project's own content are not hidden either.
+// included content is a warning, like the refusals of the project's own content:
+// the content is left out and the run goes on.
 func (s *contentScanner) refuse(path, reason string) {
 	if s.root == "" {
 		if s.log != nil {
-			s.log.Error("Refusing symlink in included content; symlinks are not followed", "path", path)
+			s.log.Warn("Refusing symlink in included content; symlinks are not followed", "path", path)
 		}
 		return
 	}

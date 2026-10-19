@@ -1,6 +1,11 @@
 package scanners
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,4 +62,68 @@ func TestPresetsOfAndLookups(t *testing.T) {
 	assert.False(t, ok)
 	strict, _ := LookupPreset("strict")
 	assert.Equal(t, "warning", strict.FailOn)
+}
+
+func TestSkillspectorProfileIsOptInAndSingleBatch(t *testing.T) {
+	p, ok := Lookup("skillspector")
+	require.True(t, ok)
+	assert.False(t, p.Egress)
+	assert.Equal(t, 1, p.BatchSize, "skillspector scan takes exactly one input path")
+	assert.Equal(t, []string{"--no-llm"}, p.RequiredFlags)
+	assert.Contains(t, p.Command, "--no-llm")
+	assert.Contains(t, p.Command, "{skill_dirs}")
+	assert.NotEmpty(t, p.Version)
+	assert.Empty(t, PresetsOf("skillspector"), "a heuristic scanner stays out of the presets")
+}
+
+func TestRequiredFlagsAreInTheirOwnCommand(t *testing.T) {
+	for _, p := range Profiles() {
+		for _, f := range p.RequiredFlags {
+			assert.Contains(t, p.Command, f, "%s: required flag %s", p.Name, f)
+		}
+	}
+}
+
+// profileEnums collects the "enum" of every scanner "profile" property (described as
+// an embedded scanner profile) in a decoded JSON schema.
+func profileEnums(node any, out *[][]string) {
+	switch v := node.(type) {
+	case map[string]any:
+		for key, child := range v {
+			if props, ok := child.(map[string]any); ok && key == "profile" {
+				desc, _ := props["description"].(string) //nolint:errcheck // absent means not the scanner profile
+				if enum, ok := props["enum"].([]any); ok && strings.HasPrefix(desc, "An embedded scanner profile") {
+					names := make([]string, 0, len(enum))
+					for _, e := range enum {
+						names = append(names, fmt.Sprint(e))
+					}
+					*out = append(*out, names)
+				}
+			}
+			profileEnums(child, out)
+		}
+	case []any:
+		for _, child := range v {
+			profileEnums(child, out)
+		}
+	}
+}
+
+// The schemas hard-code the profile names: adding a profile without updating the
+// enum makes validate reject the entry that uses it.
+func TestSchemaProfileEnumsMatchTheEmbeddedProfiles(t *testing.T) {
+	for _, file := range []string{"ai-rules.schema.json", "ai-rules-local.schema.json"} {
+		t.Run(file, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("..", "..", "..", "schema", file))
+			require.NoError(t, err)
+			var doc any
+			require.NoError(t, json.Unmarshal(raw, &doc))
+			var enums [][]string
+			profileEnums(doc, &enums)
+			require.NotEmpty(t, enums, "no profile enum found in %s", file)
+			for _, enum := range enums {
+				assert.ElementsMatch(t, Names(), enum)
+			}
+		})
+	}
 }

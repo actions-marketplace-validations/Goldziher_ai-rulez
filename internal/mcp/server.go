@@ -12,14 +12,6 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// serverInstructions is surfaced to MCP clients (and their models) during
-// initialization to explain what this server does and how to drive it.
-const serverInstructions = "ai-rulez manages AI assistant governance from a single source of truth in the " +
-	".ai-rulez/ directory and generates tool-specific outputs (CLAUDE.md, .cursor/rules, etc.). " +
-	"Edit source rules, context, skills, agents, domains, includes, and profiles through the CRUD tools, " +
-	"then call generate_outputs to render assistant files. Use read/list tools to inspect state and " +
-	"validate_config to check the configuration. Never edit generated files directly."
-
 type Server struct {
 	mcpServer *sdkmcp.Server
 	version   string
@@ -33,6 +25,8 @@ type Server struct {
 	// validator runs the lint behind validate_config; the CLI supplies the
 	// engine of `ai-rulez validate` so both report the same findings.
 	validator handlers.Validator
+	// judger runs the review behind the judge tool; the CLI supplies the engine of `ai-rulez judge`.
+	judger handlers.Judger
 	// policyViewer builds the report of policy_show; the CLI supplies the policy
 	// discovery of `validate --show-policy`.
 	policyViewer handlers.PolicyViewer
@@ -45,6 +39,19 @@ type Server struct {
 	// readOnly restricts the authoring tools to the read-only ones (mcp
 	// --read-only); it is ignored when authoring is false.
 	readOnly bool
+	// noProject is true for a server of a directory with no ai-rulez
+	// configuration (WithoutProject).
+	noProject bool
+	// surface records the tools registered; the instructions and the prompts
+	// follow it (surface.go).
+	surface toolSurface
+	// scopeNote is the instruction sentence about the nested scopes of an
+	// indexed repository (serve_context.go); empty when there is none.
+	scopeNote string
+	// scopedMu serializes the scoped skill writes of this server.
+	scopedMu sync.Mutex
+	// indexGen counts the announcements of the repository index (serve_indexwatch.go).
+	indexGen atomic.Int64
 }
 
 // Option configures the authoring server.
@@ -54,6 +61,11 @@ type Option func(*Server)
 // checks. Without it validate_config reports that it cannot lint.
 func WithValidator(v handlers.Validator) Option {
 	return func(s *Server) { s.validator = v }
+}
+
+// WithJudger sets the engine the judge tool runs. Without it the tool reports that it cannot judge.
+func WithJudger(j handlers.Judger) Option {
+	return func(s *Server) { s.judger = j }
 }
 
 // WithPolicyViewer sets the policy discovery policy_show reports from. Without it
@@ -129,7 +141,6 @@ func NewServer(version string, opts ...Option) *Server {
 			Resources: &sdkmcp.ResourceCapabilities{},
 		},
 		SetCacheable: authoringCacheable,
-		Instructions: serverInstructions,
 		Logger:       sdkLogger(),
 		PageSize:     pageSize,
 		// KeepAlive stays off: the server speaks stdio to the process that
@@ -147,7 +158,7 @@ func NewServer(version string, opts ...Option) *Server {
 		opt(srv)
 	}
 
-	mcpServer.AddReceivingMiddleware(srv.unknownResourceMiddleware())
+	mcpServer.AddReceivingMiddleware(srv.instructionsMiddleware(), srv.unknownResourceMiddleware())
 	srv.registerTools()
 	srv.registerPrompts()
 	srv.registerAuthoringResources()

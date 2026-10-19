@@ -9,6 +9,18 @@ builtins = ["go", "security", "git-workflow", "code-quality", "testing", "defaul
 
 default_layers = ["plugins"]
 
+[lint]
+# The repository's own /review command intentionally replaces the Claude Code and OpenCode built-in /review (AR808, AR9U0).
+allow_overrides = ["claude:review", "opencode:review"]
+# Fixtures are deliberately invalid; raw builtins are validated through their configured copies.
+ignore_paths = [
+  "bench/judge/corpus/**",
+  "internal/**/testdata/**",
+  "internal/builtins/**",
+  "tests/review/golden/**/fixtures/**",
+  "tests/fixtures/**",
+]
+
 [mcp]
 self_server_command = ["ai-rulez", "mcp"]
 

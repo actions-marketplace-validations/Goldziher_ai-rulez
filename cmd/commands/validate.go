@@ -49,6 +49,12 @@ plugin manifests, hooks and MCP files) are taken as hand-written and checked,
 and nothing is written. --path and --glob replace that detection with the files
 you name; generate, clean and lock still need a configuration.
 
+To leave files out: --exclude <glob> (repeatable, works without a configuration)
+drops matching files from that detection, and [lint] ignore_paths in config.toml
+drops the findings of matching source files. AR808 (reserved-name) checks a
+hand-written skill only in the directories its harness loads from (.claude/skills,
+a plugin's skills/, a local skill source); [lint] skill_roots replaces that list.
+
 Exit codes: 0 valid, 1 the configuration is invalid or could not be loaded,
 2 findings at or above --fail-on (default error).`,
 	Aliases: []string{"val"},
@@ -139,7 +145,7 @@ Exit codes: 0 valid, 1 the configuration is invalid or could not be loaded,
 		if valid {
 			logger.Success("Configuration is valid", "path", cfg.ConfigDir)
 		}
-		presets.WarnDuplicateContent(cfg.Log(), cfg.Content)
+		presets.WarnDuplicateContent(cfg.Log(), cfg.Content, cfg)
 		warnUnpinned(cfg)
 		warnFrontmatter(ctx, cfg)
 		displayConfigurationSummary(cfg)
@@ -270,7 +276,7 @@ func runRecursiveValidate() int { //nolint:gocyclo // linear per-root reporting;
 	}
 	strictCode := 0
 	if validateStrict {
-		strictCode = reportStrict(reports, cfgs)
+		strictCode = reportStrictCtx(ctx, reports, cfgs)
 	}
 
 	if len(failed) > 0 {
@@ -334,7 +340,7 @@ func lintOrphanPicks(ctx context.Context, bases []string) (*lint.Report, *config
 		return nil, nil, err //nolint:wrapcheck // already contextual
 	}
 	cfg.Content = &config.ContentTree{} // the named files only
-	report, err := strictLint(withOrphanRoots(ctx, bases), cfg)
+	report, err := strictLint(withUnmanagedLint(withOrphanRoots(ctx, bases)), cfg)
 	if err != nil || report == nil {
 		return nil, nil, err
 	}
@@ -407,7 +413,7 @@ func validateRoot(ctx context.Context, configPath string) validatedRoot {
 	ctx, r.notes = withRootNotes(ctx)
 	r.cfg, r.err = checkConfigFile(ctx, configPath)
 	if r.err == nil && validateStrict {
-		r.report, r.lintErr = strictLint(ctx, r.cfg)
+		r.report, r.lintErr = strictLint(withUnmanagedLint(ctx), r.cfg)
 	}
 	return r
 }

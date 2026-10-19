@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,11 +36,12 @@ func TestGitFetchProcess(t *testing.T) {
 	tree, err := source.Fetch(ctx)
 	require.NoError(t, err)
 	require.Len(t, tree.Rules, 1)
-	require.Equal(t, "Shared rule.\n", tree.Rules[0].Content)
+	require.Equal(t, "Shared rule.\n", strings.ReplaceAll(tree.Rules[0].Content, "\r\n", "\n"), "a Windows checkout may convert line endings")
 }
 
 func TestGitFetchSerializesSeparateProcesses(t *testing.T) {
 	repo := initLocalRepo(t)
+	commitFile(t, repo, ".gitattributes", "* text eol=lf\n")
 	commitFile(t, repo, ".ai-rulez/rules/shared.md", "---\nname: shared\n---\nShared rule.\n")
 	root := t.TempDir()
 	start := filepath.Join(root, "start")

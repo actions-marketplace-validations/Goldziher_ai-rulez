@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Goldziher/ai-rulez/v5/internal/config"
+	"github.com/Goldziher/ai-rulez/v5/internal/indexcache"
 	"github.com/Goldziher/ai-rulez/v5/internal/lint"
 	"github.com/Goldziher/ai-rulez/v5/internal/lockfile"
 	"github.com/Goldziher/ai-rulez/v5/internal/logger"
@@ -61,8 +62,22 @@ type Admission struct {
 	// Authored holds the skill:<name> items of the skills authored in the
 	// project (authoredSkillItems); nil skips the authored-item gate.
 	Authored map[string]lockfile.Item
+	// Verdicts remembers which content the security scan found nothing in, so
+	// a later build does not scan it again; nil scans every skill. Only a scan
+	// without any finding is recorded, and a verdict stands for exactly the
+	// bytes and the trust level it was recorded for.
+	Verdicts VerdictCache
 	// policy memoises the [governance] policy across the skills of one Admit.
 	policy *admissionPolicy
+}
+
+// VerdictCache holds the scan verdicts of Admission. Implementations
+// authenticate what they return: a verdict is trusted without a new scan.
+type VerdictCache interface {
+	// Clean reports whether the scan found nothing for the verdict key.
+	Clean(key string) bool
+	// MarkClean records that the scan found nothing for the verdict key.
+	MarkClean(key string)
 }
 
 // Admit returns a catalog holding only the admitted skills. Refused skills are
@@ -73,6 +88,7 @@ func (c *Catalog) Admit(a Admission) *Catalog {
 		Profile: c.Profile, Preset: c.Preset,
 		byName: map[string]*CatalogSkill{}, byURI: map[string]*CatalogSkill{}, byFile: map[string]*CatalogFile{},
 		refused: map[string]Refusal{}, reports: append([]ScanReport(nil), c.reports...),
+		discovery: c.discovery, repo: c.repo,
 	}
 	for name, r := range c.refused {
 		out.refused[name] = r
@@ -186,19 +202,94 @@ func (s *CatalogSkill) dropUnscannable() {
 	s.Files = kept
 }
 
-func (a Admission) scan(s *CatalogSkill) *Refusal {
-	level := s.Trust
-	if level == "" {
-		level = config.TrustWarn
-		if a.DefaultTrust != nil {
-			level = a.DefaultTrust(s)
-		}
+// scanLevelOf is the trust level a skill is scanned at: its own, else the
+// admission's default for it.
+func (a Admission) scanLevelOf(s *CatalogSkill) string {
+	if s.Trust != "" {
+		return s.Trust
+	}
+	if a.DefaultTrust != nil {
+		return a.DefaultTrust(s)
+	}
+	return config.TrustWarn
+}
+
+// verdictKey is the key of the scan verdict of a skill at a level.
+func verdictKey(level string, files []CatalogFile) string {
+	sums := make([]indexcache.FileSum, 0, len(files))
+	for i := range files {
+		sums = append(sums, indexcache.SumOfContent(files[i].RelPath, files[i].Content))
+	}
+	return indexcache.VerdictKey(level, sums)
+}
+
+// knownClean asks the verdict cache whether the scan found nothing in the skill
+// at this level before. key is the verdict key, "" without a cache.
+func (a Admission) knownClean(s *CatalogSkill, level string) (key string, known bool) {
+	if a.Verdicts == nil {
+		return "", false
+	}
+	key = verdictKey(level, s.Files)
+	if !a.Verdicts.Clean(key) {
+		return key, false
+	}
+	s.scanLevel = level
+	return key, true
+}
+
+func (a Admission) scan(s *CatalogSkill) *Refusal { return a.scanAs(s, skillSubject()) }
+
+// The log attribute that names what a scan finding is about.
+const (
+	labelSkill   = "skill"
+	labelContext = "context"
+)
+
+// scanSubject says how the scan names what it scanned: a served skill, or an
+// item of repository context.
+type scanSubject struct {
+	// where renders the location of a finding.
+	where func(file string, line int) string
+	// noun and label name the thing in a log line ("a served skill").
+	noun, label string
+	// reasonPrefix starts the reason of a refusal.
+	reasonPrefix func(level string) string
+}
+
+// skillSubject names a served skill, as the scan does.
+func skillSubject() scanSubject {
+	return scanSubject{
+		where: func(file string, line int) string { return fmt.Sprintf("%s:%d", file, line) },
+		noun:  "a served skill", label: labelSkill,
+		reasonPrefix: func(level string) string { return "security scan (trust=" + level + "): " },
+	}
+}
+
+// contextSubject names an item of repository context by its context:// URI. The
+// trust level plays no part in a refusal: an error finding withholds the file
+// whatever the level.
+func contextSubject(uri string) scanSubject {
+	return scanSubject{
+		where: func(_ string, line int) string { return fmt.Sprintf("%s:%d", uri, line) },
+		noun:  "repository context", label: labelContext,
+		reasonPrefix: func(string) string { return "security scan: " },
+	}
+}
+
+func (a Admission) scanAs(s *CatalogSkill, subject scanSubject) *Refusal {
+	level := a.scanLevelOf(s)
+	key, known := a.knownClean(s, level)
+	if known {
+		return nil
 	}
 	files := make([]lint.ServedFile, 0, len(s.Files))
 	for i := range s.Files {
 		files = append(files, lint.ServedFile{Path: s.Files[i].RelPath, Content: s.Files[i].Content})
 	}
 	findings := lint.ScanServed(a.Config, s.Name, files, level)
+	if key != "" && len(findings) == 0 {
+		a.Verdicts.MarkClean(key)
+	}
 	var blocking []lint.Finding
 	for _, f := range findings {
 		if f.Severity == lint.SeverityError {
@@ -217,7 +308,7 @@ func (a Admission) scan(s *CatalogSkill) *Refusal {
 	}
 	if len(blocking) == 0 {
 		for _, f := range findings {
-			logger.Or(a.Log).Warn("Security scan finding in a served skill", "skill", s.Name, "code", f.Code, "where", fmt.Sprintf("%s:%d", f.File, f.Line), "message", f.Message)
+			logger.Or(a.Log).Warn("Security scan finding in "+subject.noun, subject.label, s.Name, "code", f.Code, "where", subject.where(f.File, f.Line), "message", f.Message)
 		}
 		return nil
 	}
@@ -227,7 +318,7 @@ func (a Admission) scan(s *CatalogSkill) *Refusal {
 			parts = append(parts, fmt.Sprintf("and %d more", len(blocking)-3))
 			break
 		}
-		parts = append(parts, fmt.Sprintf("%s %s at %s:%d", f.Code, f.Name, f.File, f.Line))
+		parts = append(parts, fmt.Sprintf("%s %s at %s", f.Code, f.Name, subject.where(f.File, f.Line)))
 	}
-	return &Refusal{Name: s.Name, Code: blocking[0].Code, Reason: "security scan (trust=" + level + "): " + strings.Join(parts, "; ")}
+	return &Refusal{Name: s.Name, Code: blocking[0].Code, Reason: subject.reasonPrefix(level) + strings.Join(parts, "; ")}
 }

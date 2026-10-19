@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -50,6 +51,15 @@ var defaultBudgets = map[string]config.LintBudget{
 var builtinSlash = []string{
 	"add-dir", "terminal-setup", "release-notes", "security-review", "pr-comments",
 	"output-style", "install-github-app", "permissions", "init", "review", "compact", "clear",
+}
+
+// builtinSkills are skills the Claude Code harness or Anthropic's bundled plugins provide, so a
+// reference to one is not a dangling pointer. Project-specific externals belong in lint.known_names.
+func builtinSkills() []string {
+	return []string{
+		"simplify", "loop", "security-review", "update-config", "keybindings-help", "fewer-permission-prompts",
+		"claude-api", "dataviz", "run", "init", "review", "batch", "debug",
+	}
 }
 
 var builtinAgents = []string{"general-purpose", "explore", "plan", "statusline-setup", "output-style-setup"}
@@ -117,7 +127,7 @@ func Failed(findings []Finding, failOn string) bool {
 		if findings[i].IsAccepted() {
 			continue
 		}
-		if findings[i].Severity.AtLeast(threshold) || findings[i].failsScannerPolicy() {
+		if findings[i].failsAt(threshold) {
 			return true
 		}
 	}
@@ -132,16 +142,28 @@ type item struct {
 	owned   bool
 	isDoc   bool // a markdown resource of a skill or command: body checks only
 	itemDir string
+	// targetOnly distinguishes unmanaged files from configured content, which
+	// contributes to generated load budgets even when its lint findings are ignored.
+	targetOnly bool
 }
 
 type runner struct {
+	// indexless is set when the repository index listed no file: the picked targets then are the
+	// only files the tree knows, so a check of "matches a tracked file" has nothing to compare with.
+	indexless    bool
+	projDirs     sync.Map // directory -> []string of the project directories at or above it (see projectDirs)
 	cfg          *config.Config
 	mcpOnce      sync.Once
 	fakeTagOnce  sync.Once
 	injOnce      sync.Once
 	secOnce      sync.Once
 	secRes       []secretPattern
-	relMemo      sync.Map // absolute path -> tree-relative path, see rel
+	relMemo      sync.Map        // absolute path -> tree-relative path, see rel
+	ctx          context.Context // bounds the git probes, see WithContext
+	missingMu    sync.Mutex      // guards missing
+	missing      []missingPath   // AR401 findings, see dropIgnoredMissing
+	skillFiles   sync.Map        // skill directory -> every file below it, see stageSkillFiles
+	runMu        sync.Mutex      // guards addRun and the AR9E7 flag: scanner batches may report concurrently
 	injRes       []gatedRe
 	fakeTagRe    *regexp.Regexp
 	mcpEffective []config.MCPServer
@@ -151,6 +173,10 @@ type runner struct {
 	cwd          string
 	host         ambient.Host
 	planned      PlannedFiles // what a run would write, for the traps (WithPlanned)
+	reach        HarnessReach // the harnesses that load each output (WithHarnessReach)
+	namesOnce    sync.Once
+	namesMu      sync.Mutex
+	harnessNames nameTables
 	targets      *Targets     // files linted besides the content tree (WithTargets)
 	outputs      []OutputFile // generated files linted besides the authored content (WithOutputs)
 	cwdResolved  string       // cwd with its symlinks resolved, see display
@@ -158,6 +184,7 @@ type runner struct {
 	sev          map[string]Severity
 	ignore       map[string]bool
 	ignorePaths  []globMatcher
+	ignoreRules  []ruleIgnore
 	allow        []globMatcher
 	skills       map[string]bool
 	commands     map[string]bool
@@ -277,6 +304,10 @@ func WithHost(h ambient.Host) Option { return func(r *runner) { r.host = h } }
 // the files, so an untracked target is found as well.
 func WithTargets(t *Targets) Option { return func(r *runner) { r.targets = t } }
 
+// WithContext bounds the git probes of the run (such as the ignore check of AR401) by ctx;
+// without it they are unbounded.
+func WithContext(ctx context.Context) Option { return func(r *runner) { r.ctx = ctx } }
+
 // WithCwd sets the directory finding paths are shown relative to; without it
 // they are shown as given.
 func WithCwd(dir string) Option { return func(r *runner) { r.cwd = dir } }
@@ -309,7 +340,7 @@ func newRunner(cfg *config.Config, tree *Tree, so Options) (*runner, error) {
 	if err != nil {
 		return nil, fmt.Errorf("token counter: %w", err)
 	}
-	return &runner{cfg: cfg, tree: tree, docs: map[string]doc{}, counter: counter, opts: so, cwd: so.Cwd,
+	return &runner{ctx: scanContext(), cfg: cfg, tree: tree, docs: map[string]doc{}, counter: counter, opts: so, cwd: so.Cwd,
 		deps: map[string]map[string]struct{}{}, names: map[string][]string{}}, nil
 }
 
@@ -348,6 +379,7 @@ func RunWith(cfg *config.Config, tree *Tree, so Options, opts ...Option) (*Repor
 	if r.baseRel == "." {
 		r.baseRel = ""
 	}
+	r.indexless = len(tree.files) == 0
 	if r.targets != nil && len(r.targets.Files) > 0 {
 		r.tree = tree.WithFiles(r.targets.Rels())
 		tree = r.tree
@@ -390,6 +422,7 @@ func RunWith(cfg *config.Config, tree *Tree, so Options, opts ...Option) (*Repor
 	r.unit(unitOf("llm-config", AnalyzerConfig, AnalyzerSecurity), r.checkLLMConfig)
 	r.unit(unitOf("improve-config", AnalyzerEvals), r.checkImproveConfig)
 	r.unit(unitOf("search-index", AnalyzerSearch, AnalyzerConfig), r.checkSearchIndex)
+	r.dropIgnoredMissing()
 	r.reportSuppressionAttempts()
 	r.checkMaxFindings()
 	r.keepSelected()
@@ -475,6 +508,7 @@ func (r *runner) resolveSettings() {
 	}
 	r.applyPolicy()
 	r.ignorePaths = compileGlobs(r.lc.IgnorePaths)
+	r.ignoreRules = compileRuleIgnores(r.lc.IgnoreRules)
 	r.exampleGlobs = compileGlobs(r.lc.ExamplePaths)
 	r.allow = compileGlobs(r.lc.AllowPaths)
 }
@@ -513,6 +547,7 @@ func ValidateSettings(lc *config.LintConfig) []string {
 			problems = append(problems, fmt.Sprintf("lint.severity.%s: unknown severity %q", key, val))
 		}
 	}
+	problems = append(problems, validateIgnoreRules(lc.IgnoreRules)...)
 	for kind := range lc.Budgets {
 		if _, ok := defaultBudgets[kind]; !ok {
 			problems = append(problems, fmt.Sprintf("lint.budgets: unknown content kind %q", kind))
@@ -527,6 +562,7 @@ func ValidateSettings(lc *config.LintConfig) []string {
 	problems = append(problems, validateNewSettings(lc)...)
 	problems = append(problems, validateEvalSettings(lc)...)
 	problems = append(problems, validateTraps(lc.Traps)...)
+	problems = append(problems, validateBuiltinNames(lc.BuiltinNames)...)
 	sort.Strings(problems)
 	return problems
 }
@@ -610,7 +646,13 @@ func (r *runner) configRel(abs string) string {
 }
 
 func (r *runner) pathIgnored(abs string) bool {
-	if len(r.ignorePaths) == 0 {
+	return r.pathMatches(abs, r.ignorePaths)
+}
+
+// pathMatches reports whether abs matches one of globs, taken relative to the
+// repository root or to the configuration directory.
+func (r *runner) pathMatches(abs string, globs []globMatcher) bool {
+	if len(globs) == 0 {
 		return false
 	}
 	cands := []string{r.rel(abs)}
@@ -618,7 +660,7 @@ func (r *runner) pathIgnored(abs string) bool {
 		cands = append(cands, rel)
 	}
 	for _, c := range cands {
-		for _, g := range r.ignorePaths {
+		for _, g := range globs {
 			if c != "" && g.match(c) {
 				return true
 			}
@@ -682,6 +724,9 @@ func (r *runner) collect() {
 	for _, n := range builtinAgents {
 		r.agents[n] = true
 	}
+	for _, n := range builtinSkills() {
+		r.skills[n] = true
+	}
 	r.addInheritedNames()
 	defer r.addTargetItems()
 	c := r.cfg.Content
@@ -702,9 +747,9 @@ func (r *runner) collect() {
 	}
 }
 
-func (r *runner) addTree(configDir, domain string, rules, context, skills, agents, commands, checks []config.ContentFile) {
+func (r *runner) addTree(configDir, domain string, rules, contexts, skills, agents, commands, checks []config.ContentFile) {
 	r.addItems(configDir, kindRule, domain, rules)
-	r.addItems(configDir, kindContext, domain, context)
+	r.addItems(configDir, kindContext, domain, contexts)
 	r.addItems(configDir, kindSkill, domain, skills)
 	r.addItems(configDir, kindAgent, domain, agents)
 	r.addItems(configDir, kindCommand, domain, commands)

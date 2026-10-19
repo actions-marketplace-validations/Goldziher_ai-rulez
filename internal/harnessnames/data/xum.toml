@@ -1,0 +1,94 @@
+schema = 1
+preset = "xum"
+harness_version = "main @ 335c4ce4a79c (tag v0.31.1-nightly.618)"
+verified_on = "2026-10-18"
+completeness = "complete"
+severity = "warning"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://github.com/coder/mux/blob/335c4ce4a79c07274940b42ed0cfccda586e808a/src/browser/utils/slashCommands/registry.ts"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s2"
+url = "https://github.com/coder/mux/tree/335c4ce4a79c07274940b42ed0cfccda586e808a/src/node/builtinSkills"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s3"
+url = "https://github.com/coder/mux/blob/335c4ce4a79c07274940b42ed0cfccda586e808a/src/node/services/agentDefinitions/builtInAgentDefinitions.ts"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s4"
+url = "https://github.com/coder/mux/blob/335c4ce4a79c07274940b42ed0cfccda586e808a/src/browser/utils/slashCommands/suggestions.ts"
+quote = ".filter((skill) => !SLASH_COMMAND_DEFINITION_MAP.has(skill.name))"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s5"
+url = "https://github.com/coder/mux/blob/335c4ce4a79c07274940b42ed0cfccda586e808a/docs/agents/agent-skills.mdx"
+quote = "Built-in skills behave like any other skill for precedence purposes, so any project or global skill with the same name overrides them."
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s6"
+url = "https://github.com/coder/mux/blob/335c4ce4a79c07274940b42ed0cfccda586e808a/docs/agents/index.mdx"
+quote = "Higher-priority definitions **override** lower-priority ones with the same id."
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+evidence = "s4"
+user_collision = "builtin_wins"
+match = "exact"
+names = [
+  "btw",
+  "clear",
+  "compact",
+  "debug-llm-request",
+  "dream",
+  "fast",
+  "fork",
+  "goal",
+  "heartbeat",
+  "idle",
+  "model",
+  "new",
+  "plan",
+  "refine",
+  "side",
+  "ultrafast",
+  "vim",
+  "workflow",
+]
+
+[[group]]
+kind = "skill"
+source = "s2"
+evidence = "s5"
+user_collision = "user_wins"
+match = "exact"
+names = [
+  "background-monitors",
+  "deep-research",
+  "init",
+  "loop",
+  "orchestrate",
+  "spawn",
+  "workflow-authoring",
+  "xum-diagram",
+  "xum-docs",
+]
+
+[[group]]
+kind = "agent"
+source = "s3"
+evidence = "s6"
+user_collision = "user_wins"
+match = "exact"
+names = ["compact", "desktop", "dream", "exec", "explore", "intuition", "name_workspace", "plan"]

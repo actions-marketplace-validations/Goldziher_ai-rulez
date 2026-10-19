@@ -130,7 +130,7 @@ var baseRuleDocs = map[string]RuleDoc{
 	CodePathMissing: {
 		Why:  "A backticked repository path that does not exist is stale guidance that misleads the model.",
 		Bad:  "`Edit src/old_module/api.py` after the module moved",
-		Good: "Update the path, or list generated paths in lint.allow_paths",
+		Good: "Update the path, list paths that need not exist in lint.allow_paths, or drop the rule for some files with [[lint.ignore_rules]]. A path that git ignores (.gitignore, .git/info/exclude, the global excludes file) is local by design and is not reported",
 	},
 	CodeSkillResourceMissing: {
 		Why:  "A skill that refers to references/, scripts/ or assets/ files it does not ship fails the moment the model follows the reference. A path that names a sibling skill explicitly (`skills/<other>/references/x.md`, `.claude/skills/<other>/references/x.md`) is resolved against that skill's directory too, so one skill can point at another's file.",
@@ -273,6 +273,7 @@ func suppressSyntax(r RuleInfo) []string {
 		fmt.Sprintf("config.toml: [lint] ignore = [%q]", r.Code),
 		fmt.Sprintf("config.toml: [lint.severity] %s = \"off\" (or \"info\" to keep it visible without failing)", r.Code),
 		"config.toml: [lint] ignore_paths = [\"<glob>\"] for one source file",
+		fmt.Sprintf("config.toml: [[lint.ignore_rules]] rules = [%q] paths = [\"<glob>\"] for this rule in those files only", r.Code),
 		"baseline: validate --update-baseline accepts the current findings with a reason",
 	)
 }

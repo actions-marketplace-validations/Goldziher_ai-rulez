@@ -134,10 +134,12 @@ linters:
     generated: lax
 
     rules:
-      # forbidigo applies to the engine's library packages only: the command line, the
-      # packages that are the process boundary (ambient, runner) or CLI-only by design
-      # (agents, watch, logger, telemetry), tests and fixtures are exempt.
-      - path: '^(cmd/|tests/|internal/(ambient|runner|agents|watch|testutil|logger|telemetry)/|internal/signing/sigstore/fakesigstore/)|_test\.go$'
+      # forbidigo applies to the engine's library packages only: the command line, the benchmark
+      # harnesses (bench/ starts the measured binary; scripts/testshard/ starts isolated tests),
+      # the packages that are the process boundary
+      # (ambient, runner) or CLI-only by design (agents, watch, logger, telemetry), tests and
+      # fixtures are exempt.
+      - path: '^(cmd/|bench/|tests/|scripts/testshard/|internal/(ambient|runner|agents|watch|testutil|logger|telemetry)/|internal/signing/sigstore/fakesigstore/)|_test\.go$'
         linters:
           - forbidigo
 

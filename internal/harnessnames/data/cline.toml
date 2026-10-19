@@ -1,0 +1,69 @@
+schema = 1
+preset = "cline"
+harness_version = "vscode extension 4.1.25 / cli 3.0.72 (v4.1.25)"
+verified_on = "2026-10-18"
+completeness = "complete"
+severity = "error"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://github.com/cline/cline/blob/v4.1.25/apps/cli/src/tui/commands/slash-command-registry.ts"
+quote = "if (!normalized || byName.has(normalized)) {"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s2"
+url = "https://github.com/cline/cline/blob/v4.1.25/apps/vscode/webview-ui/src/components/chat/chat-view/hooks/useMessageHandlers.ts"
+quote = "return text === \"/compact\" || text === \"/smol\" || text === \"/newtask\""
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s3"
+url = "https://github.com/cline/cline/blob/v4.1.25/apps/vscode/src/sdk/builtin-slash-commands.ts"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s4"
+url = "https://github.com/cline/cline/blob/v4.1.25/apps/vscode/src/sdk/SdkController.ts"
+quote = "return expandSlashCommands(text, [...service.listRuntimeCommands(), ...BUILTIN_SLASH_COMMANDS], {"
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+user_collision = "builtin_wins"
+match = "exact"
+names = [
+  "account",
+  "clear",
+  "compact",
+  "config",
+  "fork",
+  "help",
+  "history",
+  "mcp",
+  "model",
+  "plugins",
+  "quit",
+  "settings",
+  "skills",
+  "theme",
+  "undo",
+]
+
+[[group]]
+kind = "command"
+source = "s2"
+user_collision = "builtin_wins"
+match = "exact"
+names = ["newtask", "smol"]
+
+[[group]]
+kind = "command"
+source = "s3"
+evidence = "s4"
+user_collision = "user_wins"
+match = "exact"
+names = ["deep-planning"]

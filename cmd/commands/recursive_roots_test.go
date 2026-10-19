@@ -67,6 +67,7 @@ func gitMonorepo(t *testing.T, n int) string {
 		pluginMode, dryRun, profile, validateStrict = false, false, "", false
 	})
 	pluginMode, dryRun, profile = false, false, ""
+	delete(RootCmd.Annotations, activeFormatKey) // a command that ran earlier may have left --format json behind
 	return root
 }
 
@@ -200,8 +201,9 @@ func TestRunRecursiveValidate_ListsTheIndexOncePerPurpose(t *testing.T) {
 	_, _ = capture(t, func() { require.Equal(t, 0, runRecursiveValidate()) })
 
 	// One listing answers "is the config tracked" for every root; the strict run's
-	// own `ls-files -s` indexes the repository once.
-	assert.LessOrEqual(t, len(lsFilesCalls(calls())), 2, "got %v", lsFilesCalls(calls()))
+	// own `ls-files -s` indexes the repository once; the files nobody generated are
+	// found from one more listing that every root shares.
+	assert.LessOrEqual(t, len(lsFilesCalls(calls())), 3, "got %v", lsFilesCalls(calls()))
 }
 
 func TestRecursiveRuns_PrintAProgressLinePerRoot(t *testing.T) {

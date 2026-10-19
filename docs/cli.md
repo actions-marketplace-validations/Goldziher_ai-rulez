@@ -14,7 +14,7 @@ All AI-Rulez CLI commands and flags.
 | `ai-rulez clean`                | Remove files produced by `generate`                 |
 | `ai-rulez validate`             | Validate configuration                              |
 | `ai-rulez cost`                 | Report the biggest context-cost offenders           |
-| `ai-rulez verify`               | Verify generated files against their hashes (`--plugin` for plugin bundles) |
+| `ai-rulez verify`               | Verify signatures, approvals and provenance (`--plugin` for plugin bundles; use `generate --check` for generated-file drift) |
 | `ai-rulez lock`                 | Pin remote includes, installed skills and authored content in `ai-rulez.lock` ([Lock file](lockfile.md)) |
 | `ai-rulez sign`                 | Sign the lock, a plugin bundle, a skill, an SBOM or a policy into a Sigstore bundle ([details](#sign-command)) |
 | `ai-rulez trust update`         | Cache the Sigstore trusted root used to verify keyless attestations ([details](#trust-command)) |
@@ -25,6 +25,7 @@ All AI-Rulez CLI commands and flags.
 | `ai-rulez sbom`                 | CycloneDX 1.6 or SPDX 2.3 bill of materials of the AI configuration ([SBOM](sbom.md)) |
 | `ai-rulez publish`              | Deterministic, checksummed release artifacts of the plugin bundle, optionally signed; `--to github-release\|npm\|oci --execute --yes` uploads ([Publish](publish.md)) |
 | `ai-rulez doctor`               | Read-only diagnostics for the project's setup ([details](#doctor-command)) |
+| `ai-rulez cache status` / `cache clear` | Show or drop the repository index cache of the MCP server ([details](#ai-rulez-cache-statusclear)) |
 | `ai-rulez guard`                | PreToolUse hook that blocks agent edits to generated files; run by the harness ([details](#guard-command)) |
 | `ai-rulez llm doctor` / `llm estimate` | Inspect the `[llm]` model-access setup and estimate prompt cost, without calling a model ([details](llm.md)) |
 | `ai-rulez verifiers run/list/explain/test/calibrate/suggest` | Run the deterministic repo checks declared as `[[verifiers]]` or under `.ai-rulez/verifiers/` ([details](#verifiers-command)) |
@@ -37,7 +38,7 @@ All AI-Rulez CLI commands and flags.
 | `ai-rulez eval import`          | Import eval scenarios from another tool as eval cases ([details](evals.md#importing-scenarios)) |
 | `ai-rulez eval calibrate-estimate` | Propose cost-estimate assumptions measured from recorded runs ([details](evals.md#calibrating-the-estimate)) |
 | `ai-rulez review` / `rubric`    | Score skills against a rubric: offline, or with an LLM judge (`--semantic`), calibration, a calibrated gate and `review fix` ([details](#review-commands)) |
-| `ai-rulez judge`                | Grade `AGENTS.md` and `.agents/*` with a model, from flags alone, with no config file ([details](#judge-command)) |
+| `ai-rulez judge`                | Review skills, agents, rules and `CLAUDE.md` files with models: verified quotes, an adjudicator, repo-aware governance; no config file needed ([details](#judge-command)) |
 | `ai-rulez improve`              | (experimental) Improve a skill with an external optimizer behind a held-out eval gate ([Improve](improve.md)) |
 | `ai-rulez telemetry`            | Opt-in usage log, feedback, reports, item-load telemetry and OTLP export ([details](#telemetry-commands)) |
 | `ai-rulez export okf` / `import okf` / `okf validate` | Open Knowledge Format bundles ([details](#okf-commands)) |
@@ -70,6 +71,9 @@ Every command in the binary, generated from the command tree (`task docs:cli`). 
 | `ai-rulez builtins` | Manage built-in domains |
 | `ai-rulez builtins list` | List all available built-in domains |
 | `ai-rulez builtins show` | Show the full content of a built-in domain |
+| `ai-rulez cache` | Show or clear the repository index cache |
+| `ai-rulez cache clear` | Remove the index cache of this project |
+| `ai-rulez cache status` | Show where the index cache is, its size and its entry count |
 | `ai-rulez catalog` | List every item with owner, version, tokens, roles and lock status, or a static site |
 | `ai-rulez catalog diff` | Compare two catalogs: JSON files or git revisions |
 | `ai-rulez clean` | Remove files produced by generate |
@@ -116,7 +120,7 @@ Every command in the binary, generated from the command tree (`task docs:cli`). 
 | `ai-rulez include list` | List all includes |
 | `ai-rulez include remove` | Remove an include source |
 | `ai-rulez init` | Initialize a new AI rules configuration |
-| `ai-rulez judge` | Grade instruction files with a model (AI as a judge), without any configuration |
+| `ai-rulez judge` | Review agent configuration with models: security, quality and governance, with verified evidence |
 | `ai-rulez list` | List rules, context, and skills |
 | `ai-rulez list agents` | List all agents |
 | `ai-rulez list checks` | List all code-review checks |
@@ -134,12 +138,22 @@ Every command in the binary, generated from the command tree (`task docs:cli`). 
 | `ai-rulez local show` | Show what the local overlay overrides |
 | `ai-rulez local unset` | Remove a key from the local overlay |
 | `ai-rulez lock` | Pin remote includes, installed skills and authored content in ai-rulez.lock |
+| `ai-rulez marketplace` | Manage installed plugin marketplaces |
+| `ai-rulez marketplace add` | Add a plugin marketplace from a repository, a local directory or an https URL |
+| `ai-rulez marketplace list` | List installed marketplaces |
+| `ai-rulez marketplace remove` | Remove an installed marketplace |
+| `ai-rulez marketplace update` | Re-pin installed marketplaces (and their plugins) in ai-rulez.lock to the current remote commit |
 | `ai-rulez mcp` | Start Model Context Protocol (MCP) server |
 | `ai-rulez migrate` | Migrate a 4.x configuration to the 5.0 format, or a content tree to OKF |
 | `ai-rulez migrate okf` | Convert the .ai-rulez/ content tree to an OKF bundle, in place |
 | `ai-rulez migrate v5` | Migrate a 4.x configuration to the 5.0 format |
 | `ai-rulez okf` | Work with OKF (Open Knowledge Format) bundles |
 | `ai-rulez okf validate` | Lint an OKF bundle (works on third-party bundles) |
+| `ai-rulez plugin` | Manage installed plugins imported from marketplaces or repositories |
+| `ai-rulez plugin install` | Install a plugin from a marketplace, a repository or a local directory |
+| `ai-rulez plugin list` | List installed plugins |
+| `ai-rulez plugin remove` | Remove an installed plugin |
+| `ai-rulez plugin update` | Re-pin installed plugins in ai-rulez.lock to their current remote commit |
 | `ai-rulez profile` | Manage profiles |
 | `ai-rulez profile add` | Add a new profile |
 | `ai-rulez profile list` | List all profiles |
@@ -173,6 +187,7 @@ Every command in the binary, generated from the command tree (`task docs:cli`). 
 | `ai-rulez scanners doctor` | Check named scanners: binary, version, egress, environment and configuration |
 | `ai-rulez scanners list` | List the configured scanners with their egress declaration and whether they are installed |
 | `ai-rulez search` | Rank the served skills against a query, build the embedding index, or evaluate the ranking |
+| `ai-rulez session-start` | Regenerate outputs and brief the agent when a remote session starts (SessionStart hook) |
 | `ai-rulez show` | Show the content of a rule, context, skill, agent, command or check |
 | `ai-rulez show agent` | Show an agent |
 | `ai-rulez show check` | Show a code-review check |
@@ -1234,7 +1249,7 @@ A later entry of `inputRoots` overrides a same-named item of an earlier one (`ap
 
 **Exit codes:** 0 done (the report may contain losses) or nothing to convert, 1 could not run or would overwrite existing files, 2 blocked by the scan or validation, or `--fail-on` matched.
 
-**Nothing to convert.** When no importer finds anything to import (no tool files, or only files `ai-rulez generate` wrote), `convert` prints `Nothing to convert: ...` with a hint, writes nothing and exits 0, so a script converting many repositories keeps going. With `--format json` the message goes to stderr and stdout stays empty.
+**Nothing to convert.** When no importer finds anything to import (no tool files, or only files `ai-rulez generate` wrote), `convert` prints `Nothing to convert: ...` with a hint, writes nothing and exits 0, so a script converting many repositories keeps going. With `--format json` the message goes to stderr and stdout carries an empty report (`written: false`, no files) that validates against the report schema.
 
 #### `init --from`
 
@@ -1348,6 +1363,7 @@ ai-rulez generate [flags]
 | `--recursive`            | boolean | false         | Find and process configs recursively; exits non-zero if any root fails (the others are still processed)                                                 |
 | `--offline`             | boolean | false         | Skip fetching remote includes and use cached content                                                                                                    |
 | `--verify-tags`                 | boolean | false         | Before generating, ask the remotes whether a tag pinned in `ai-rulez.lock` moved (`AR732`, exit 2) or was deleted (`AR735`); needs the network. Also `[lock] verify_tags = true` |
+| `--refresh-remote`              | boolean | false         | Before generating, re-resolve remote installed skills, includes and skill sources to the newest version their constraint allows and rewrite `ai-rulez.lock`. The security scan of the new trees runs first and a refusal aborts before any output is written. Also `[lock] refresh_on_generate = true`. Needs the network; cannot be combined with `--check`, `--dry-run`, `--emit-plan`, `--locked`, `--frozen`, `--offline`, `--watch`, `--recursive`, `--user` or `--plugin` |
 | `--emit-plan FILE`              | string  |               | Write the generation plan as JSON to FILE (`-` for stdout) and apply nothing ([details](#embedding-the-plan)) |
 | `--no-local`                    | boolean | false         | Ignore the machine-local `config.local.*` overlay and `local/` content: generate the view a teammate without them sees. Also on `validate` and `tokens` (`verify` always checks the shared view) |
 | `--check`                       | boolean | false         | Write nothing; compare the sources with the files on disk, list the differing ones (`missing:`, `stale:`, `edited:`, `orphan:`) and exit 2 on drift. Works with `--recursive`, `--profile`, `--no-local` ([details](#detecting-drift)) |
@@ -1370,7 +1386,7 @@ ai-rulez generate [flags]
 
 `--dry-run` lists each file as `write-file:` (it would be written), `unchanged:` (already current) or `edited:` (changed by hand; `generate` overwrites the edit).
 
-Before writing, `generate` also prints a summary of hook commands, command-based MCP servers, `[permissions] allow` rules and other command-bearing settings that are new or changed since the previous run on this machine (all of them in a fresh clone), even with `--quiet`. It only warns; `--yes` or `AI_RULEZ_ACK_COMMANDS=1` silences it. The MCP `generate_outputs` tool returns the same summary as `new_commands`. With `--watch` the summary is printed on each regeneration (what is new since the previous run), so a hook or MCP command that arrives with a pulled change is shown by the run that writes it.
+Before writing, `generate` also prints a summary of hook commands (the `SessionStart` hook of `[session_start]` included), command-based MCP servers, `[permissions] allow` rules and other command-bearing settings that are new or changed since the previous run on this machine (all of them in a fresh clone), even with `--quiet`. It only warns; `--yes` or `AI_RULEZ_ACK_COMMANDS=1` silences it. The MCP `generate_outputs` tool returns the same summary as `new_commands`. With `--watch` the summary is printed on each regeneration (what is new since the previous run), so a hook or MCP command that arrives with a pulled change is shown by the run that writes it.
 
 Exit codes: `0` written, `1` a configuration failed to load, validate or generate (every root of a `--recursive` run is still processed), `2` `--check` found drift or `--locked`/`--frozen` found an authored source that differs from the lock (also a recursive run where every failure is lock drift). See [Exit Codes](#exit-codes).
 
@@ -1674,6 +1690,23 @@ Exit codes: `2` the call edits a generated file (the reason, with the source to 
 echo '{"tool_name":"Edit","tool_input":{"file_path":"AGENTS.md"}}' | ai-rulez guard; echo $?
 ```
 
+## Session-start Command
+
+### `ai-rulez session-start`
+
+The harness runs this command, not people. `generate` adds it as a `SessionStart` hook to `.claude/settings.json` by default for a project that generates for Claude Code ([Run generate when a remote session starts](session-start.md)). In a remote session (`CLAUDE_CODE_REMOTE=true`) it runs `generate`, then prints the hook's `additionalContext` JSON on stdout; elsewhere it does nothing unless `[session_start] when = "always"`. It always exits `0`; a problem is one line on stderr.
+
+```bash
+echo '{"source":"startup"}' | CLAUDE_CODE_REMOTE=true ai-rulez session-start
+ai-rulez session-start --when always --generate-mode plain
+```
+
+| Flag | Description |
+| --- | --- |
+| `--when remote\|always` | Override `[session_start] when` |
+| `--generate-mode auto\|locked\|frozen\|plain` | Override `[session_start] mode` |
+| `--timeout <seconds>` | Override `[session_start] timeout` (default 120) |
+
 ## Doctor Command
 
 ### `ai-rulez doctor`
@@ -1695,6 +1728,8 @@ ai-rulez doctor [--strict] [--format json] [--profile <name>] [--no-local]
 | `documents` | A shared settings document ai-rulez merges into (`.claude/settings.json`, `.mcp.json`, `.codex/config.toml`, ...) that no longer parses as JSON, JSONC, TOML or YAML | error |
 | `hooks` | A `[[hooks]]` script that does not exist or is not executable. The script paths are checked directly, so the result does not depend on git state or on `[lint]` overrides of `AR504` and `AR505` | error |
 | `lock` | `ai-rulez.lock` does not match the remote includes and installed skills, or authored content differs from its content pins (checked offline against the sources, as in `lock --check`; an error when `[lock] enforce = true`) | warning |
+| `session-start` | The `SessionStart` hook: `info` listing the launchers it tries in order (`ai-rulez`, `npx -y ai-rulez@latest`, `uvx --from ai-rulez@latest`); a warning when the generated `.claude/settings.json` lacks the hook or is ignored by version control, and, inside a remote session, when none of `ai-rulez`, `npx` and `uvx` is on `PATH` or the npm registry is denied or unreachable (asked with one GET) | info, warning |
+| `index-cache` | The repository index cache of `mcp --serve-skills --discover-skills` ([`cache`](#ai-rulez-cache-statusclear)): `info` naming the location in use (user cache, or the project fallback), its size and entry counts; a warning when the location is not writable or the index file is corrupt, of another version or not authentic. Silent when discovery is off and no cache exists | info, warning |
 | `tools` | The binary behind a preset (`claude`, `codex`, `gemini`, ...) is not on `PATH`; presets whose binary is not known are skipped | info |
 
 With `--debug`, `doctor` logs one `Doctor check finished` line per check with its name and duration, to find the slow one.
@@ -2051,24 +2086,32 @@ Documented in [Judge](judge.md).
 
 ### `ai-rulez judge [paths...]`
 
-Grade instruction files against a rubric with a model. It reads no configuration: the model comes from flags and `AI_RULEZ_LLM_*` variables, the key from the provider's own variable. With no paths it judges `AGENTS.md` at any depth and the `.agents/` and `.ai-rulez/` Markdown; generated files are skipped.
+Review agent configuration (skills, agents, commands, rules, `CLAUDE.md`, `AGENTS.md`, MCP and settings files) with security, quality and governance reviewers, a verifier that checks every quote, and an adjudicator. It needs no configuration. With no paths it judges every unit below the working directory that a harness reads, nested `.claude/` directories included; generated files are skipped.
 
 | Flag | Meaning |
 | --- | --- |
-| `--allow-llm` | Agree to send file content to the provider; required to call a model |
-| `--model provider/model`, `--provider p` | The model (or `AI_RULEZ_LLM_MODEL`, `AI_RULEZ_LLM_PROVIDER`) |
-| `--max-cost usd` | Spend cap (default 0.25; 0 removes it); refuses to start when the worst case exceeds it or the model has no known price |
-| `--price-input usd`, `--price-output usd` | Price per million tokens of a model the price table does not know, so `--max-cost` works (both required) |
-| `--max-tokens n` | Cap on prompt plus completion tokens of the run |
-| `--estimate`, `--dry-run`, `-n` | List the files, the egress host and model and the token and cost estimate; send nothing |
-| `--redact` | Mask secret-looking text and send the file; by default such a file is skipped and counts as a finding |
-| `--rubric builtin:instruction-quality\|file` | The rubric (default `builtin:instruction-quality`) |
-| `--min-score s` | Lowest passing score from 0 to 1 (default 0.7) |
-| `--no-cache` | Do not read or write the response cache |
-| `--format text\|json` | Output format (`schema/judge-report.schema.json`) |
+| `--allow-llm` | Agree to send the units' content to the provider; required to call a model |
+| `--estimate`, `--dry-run`, `-n` | List the units, what is attached to each, the egress host and models and the token and cost estimate; send nothing |
+| `--model provider/model`, `--adjudicator-model m`, `--model-for ROLE=M`, `--provider p` | The models (defaults: Bedrock Sonnet 5.5 for the reviewers, Opus 5.5 for the adjudicator); `AI_RULEZ_LLM_MODEL` and `AI_RULEZ_LLM_PROVIDER` also work |
+| `--categories security,quality,governance` | The reviewers to run (default all) |
+| `--fail-on list` | `category:severity`, `category:none`, `score:n` or `category:score:n` (default `security:high,governance:high,quality:none`) |
+| `--min-confidence low\|medium\|high` | Drop findings below a confidence |
+| `--changed[=rev]`, `--since rev`, `--impact` | Judge only the units changed since `rev` (`HEAD` for a bare `--changed`; `--since rev` is the same as `--changed=rev`), and the units a changed rule or `CLAUDE.md` applies to (`--impact` is on by default) |
+| `--attach-rules`, `--attach-claude-md` | Attach the path-scoped rules and the nested `CLAUDE.md` / `AGENTS.md` files to each unit (both default on) |
+| `--skill name\|path:dir`, `--skill-for category=name\|path:dir` | Rubric skills (repeatable) |
+| `--max-cost usd` | Spend cap (default 2.00; 0 removes it); every model must be priced under a cap |
+| `--max-tokens n`, `--max-calls n` | Caps on the tokens and calls of the run |
+| `--price-input usd`, `--price-output usd` | Price per million tokens of a model the price table does not know (both required) |
+| `--concurrency n`, `--rpm n` | Calls in flight (default 4) and started per minute |
+| `--redact` | Mask secret-looking text and send the unit; by default such a unit is withheld and counts as a finding |
+| `--allow-partial` | Accept a run in which a unit was only partly reviewed |
+| `--explain-drops` | List the dropped candidates and why |
+| `--allow-prompt-override` | Let a repository prompt file replace a reviewer's role prompt |
+| `--no-cache`, `--cache-readonly` | Skip the response cache, or serve hits without storing |
+| `--format text\|json\|sarif` | Output format (`schema/judge-report.schema.json` for json) |
 | `--policy`, `--policy-*` | Organization policy; one that forbids model use stops a real run |
 
-Exit codes: 0 every file passed (or `--estimate`), 1 could not run or a call failed, 2 a file scored below `--min-score` or was skipped for secrets.
+Exit codes: 0 every unit passed or warned (or `--estimate`), 1 the run could not complete (refused, capped, a call failed, nothing to judge, a unit only partly reviewed), 2 a unit met `--fail-on` or was withheld for secrets.
 
 ## Search Command
 
@@ -2179,7 +2222,7 @@ ai-rulez validate [flags]
 | `--fail-on`           | string  | Lowest severity that exits 2 (`error` default, `warning`, `info`, `none`) |
 | `--external`          | boolean | Also run the `[[lint.external]]` scanners and merge their findings |
 | `--allow-egress`      | strings | With `--external`: allow the named scanners that declare `egress = true` to run (repeatable; a name no `[[lint.external]]` declares is an error) |
-| `--write-baseline`, `--reason`, `--scanner-baseline`, `--show-suppressed` | | With `--external`: the scanner baseline flags ([Scan Command](#scan-command)) |
+| `--write-baseline`, `--reason`, `--reason-for`, `--min-severity`, `--rule`, `--scanner-baseline`, `--show-suppressed` | | With `--external`: the scanner baseline flags ([Scan Command](#scan-command)) |
 | `--no-scan-cache` | boolean | With `--external`: ignore and do not update the scanner result cache |
 | `--dry-run` | boolean | With `--external` (and no `--fix`): print what each scanner would run and start nothing ([Scan Command](#scan-command)) |
 | `--baseline`          | string  | Accept the findings in this baseline file (default `<config dir>/lint-baseline.json` when present); only new findings fail |
@@ -2187,7 +2230,7 @@ ai-rulez validate [flags]
 | `--baseline-reason`   | string  | With `--update-baseline`: the reason stored on new entries (required for security findings) |
 | `--strict-baseline`   | boolean | Exit 2 when the baseline has stale or expired entries (ratchet) |
 | `--since`             | string  | Report only findings in files changed since this git revision and in files that refer to them (the whole tree is still resolved) |
-| `--changed`           | boolean | Shorthand for `--since HEAD` (uncommitted and untracked changes) |
+| `--changed[=REV]`     | string  | Like `--since`, with an optional base: bare `--changed` is `--since HEAD` (uncommitted and untracked changes), `--changed=origin/main` is `--since origin/main`. Write the value with `=`; a separate word is not taken as the base |
 | `--verifiers`         | boolean | Also evaluate the verifiers (never a command or a model) and report them as `AR9H1`-`AR9H6` findings |
 | `--approvals-base`    | string  | Also report approvals added since this git revision for content that also changed since it (`AR716`, see [Approvals](approvals.md#approvals-are-assertions)) |
 | `--since-depth`       | string  | With `--since` or `--changed`: how many reference hops to follow from the changed files, a number or `all` (default `1`); each JSON finding carries a `hop` (`changed`, `dependent`, `transitive(n)`) |
@@ -2203,7 +2246,7 @@ ai-rulez validate [flags]
 
 Exit codes: `0` valid, `1` the configuration is invalid or could not be loaded, `2` findings at or above `--fail-on`.
 
-When the content tree is an OKF bundle (a root `index.md`, see `migrate okf`), `validate` also runs the OKF checks. "Configuration is valid" is printed only after they pass, so a run that exits `2` never says it; with `--format json` (or `--output`) that run writes the OKF document (`bundle`, `okf_spec`, `concepts`, `findings`) instead of the lint report, so a JSON consumer always gets a document. A rule or context file with no frontmatter block at all is plain native markdown: `generate` accepts it, so `validate` reports it as an `AR9B1` warning (run `migrate okf` to add the `type`) and `generate --check` stays clean; a frontmatter block without a `type`, or one that does not parse, is still an error. `-q` drops the summary lines (`N concepts, ...` and `strict validation: ...`); findings stay.
+When the content tree is an OKF bundle (a root `index.md`, see `migrate okf`), `validate` also runs the OKF checks. "Configuration is valid" is printed only after they pass, so a run that exits `2` never says it; with `--format json` (or `--output`) that run writes the OKF document (`bundle`, `okf_spec`, `concepts`, `findings`) instead of the lint report, so a JSON consumer always gets a document. A rule or context file with no frontmatter block at all is plain native markdown: `generate` accepts it, so `validate` reports it as an `AR9B1` warning (run `migrate okf` to add the `type`) and `generate --check` stays clean; a frontmatter block without a `type`, or one that does not parse, is still an error. `-q` drops the summary lines (`N concepts, ...` and `validation: ...`); findings stay.
 
 **Examples:**
 
@@ -2599,6 +2642,8 @@ With `--external`, the scanners of `[[lint.external]]` also run (see [External s
 | --- | --- |
 | `--allow-egress <name>` | Allow a scanner declared `egress = true` to run (repeatable) |
 | `--write-baseline --reason <text>` | Accept every current scanner finding in `.ai-rulez/scanner-baseline.json` and exit as if clean; `--reason` is required |
+| `--min-severity <level>`, `--rule <glob>` | With `--write-baseline`, record only findings of at least that severity, or of those scanner rule ids (`rule`, `scanner:rule` or an `AR` code; `*` globs; `--rule` repeats). Findings left out stay reported and keep any entry they already have |
+| `--reason-for <rule>=<text>` | With `--write-baseline`, the reason of new entries of that rule (a glob; repeatable; the most specific pattern wins); `--reason` covers the rest. `{rule}`, `{severity}` and `{scanner}` in either are replaced per entry |
 | `--scanner-baseline <file>` | Use another scanner baseline file |
 | `--show-suppressed` | Also show results the scanner marked suppressed, as `info` |
 | `--no-scan-cache` | Ignore and do not update the [scanner result cache](strict-validation.md#result-cache-and-dry-runs) |
@@ -2728,6 +2773,19 @@ Show the current version and build information.
 ai-rulez version
 ai-rulez version --format json   # {"schema_version": 1, "version": "5.0.0"}
 ```
+
+### `ai-rulez cache status|clear`
+
+Manage the index cache of `mcp --serve-skills --discover-skills`: the summaries of the instruction files, rules, agents and skills a repository keeps at any depth, and the scan verdicts of content found clean. It never holds a file body. The cache lives in `<user cache>/ai-rulez/monorepo-index/<repo-id>/`, or in `.ai-rulez/.cache/` (`.ai-rulez-cache/` in the root layout) when the user cache is not writable; `[mcp] index_cache = "user" | "repo" | "off"` chooses. See [The index cache](mcp-server.md#the-index-cache).
+
+```bash
+ai-rulez cache status                 # location, size, entry and verdict counts, warnings
+ai-rulez cache status --format json   # schema/cache-status.schema.json
+ai-rulez cache clear                  # remove this project's cache
+ai-rulez cache clear --all            # remove the index caches of every project in the user cache
+```
+
+`clear` needs no confirmation: a cache is rebuilt on the next start. `--format json` follows `schema/cache-clear.schema.json`. Both commands work in a directory with no configuration.
 
 ## MCP Server
 
@@ -2867,7 +2925,7 @@ in these tables.
 | `AI_RULEZ_QUIET` | `--quiet` | Hide progress and information lines (results, warnings, errors stay) |
 | `AI_RULEZ_LAYERS` | none | Comma-separated `config.<name>.toml` layers merged over `config.toml`, in order, falling back to `AI_RULEZ_PROFILE`; see `ai-rulez config layers` |
 | `AI_RULEZ_PROFILE` | `--profile` | Active profile (or comma-separated composition) when the flag is not given |
-| `AI_RULEZ_ROLE` | `--role`, `mcp --serve-skills --serve-role` | Active role (or comma-separated composition) when the flag is not given |
+| `AI_RULEZ_ROLE` | `--role` (also `mcp --serve-skills --role`) | Active role (or comma-separated composition) when the flag is not given |
 | `AI_RULEZ_GIT_TOKEN` | `--token` / `-T` | Git access token for private includes and skill sources |
 | `AI_RULEZ_GIT_TOKEN_HOSTS` | | Comma-separated hosts the git token may be sent to (default `github.com`) |
 | `AI_RULEZ_FORGE_HOSTS` | | Comma-separated hosts the forge API client may contact (default `github.com`); `GITHUB_TOKEN` / `GH_TOKEN` supply its token |
@@ -2878,7 +2936,7 @@ in these tables.
 | `AI_RULEZ_ALLOW_FILE_URLS` | | `1` lets a `file://` git source outside the project resolve from the project config |
 | `AI_RULEZ_MAX_CLONE_BYTES`, `AI_RULEZ_MAX_CLONE_FILES` | `mcp --serve-skills` clone limits | Largest git skill source clone (default 256 MiB, 20000 files) for sources that set no `max_clone_bytes` / `max_clone_files` |
 | `AI_RULEZ_HOME` | | Extra directory `improve pr` allows its worktree commands to write and forwards to them |
-| `AI_RULEZ_TODAY` | `--today` | Pin "today" (`YYYY-MM-DD`) for baseline expiry, for reproducible runs |
+| `AI_RULEZ_TODAY` | `validate --today` (hidden) | Pin "today" (`YYYY-MM-DD`) for baseline expiry, for reproducible runs |
 | `AI_RULEZ_EVAL_DATE` | `eval run --date` | Date recorded in eval results |
 
 **Organization policy** (see [Organization policy](policy.md))
@@ -2931,7 +2989,7 @@ Commands that load a project directory use the following config order:
 3. **Project convention**: `.config/ai-rulez/config.toml`, used only when discovering the default layout (an explicit `--config-dir` is honoured exactly and never falls back)
 4. **Error**: No configuration found
 
-The search walks up from the current directory. `config.toml` is the only config format read. A project that has only a YAML or JSON config (`.ai-rulez/config.yaml`, `.yml` or `.json`, or a `config.local.yaml`, `.yml` or `.json` overlay), or a flat V2 `ai-rulez.yaml` (also `.ai-rulez.yaml`, `ai_rulez.yaml` and their `.yml` forms), stops with an error that names the file and exits `1`; run `ai-rulez migrate v5` to convert it (a 2.x or 3.x project goes through ai-rulez 4.x first). A `config.toml` whose `version` is `4.0` stops the same way. `doctor` reports the same file.
+The search walks up from the current directory to the nearest directory that holds a configuration in any layout, stopping at the repository root (else the file system root, and never above the home directory). Outputs are written relative to that directory, and the error for a missing configuration names where it looked. `--recursive` and `--watch` keep their own discovery. `config.toml` is the only config format read. A project that has only a YAML or JSON config (`.ai-rulez/config.yaml`, `.yml` or `.json`, or a `config.local.yaml`, `.yml` or `.json` overlay), or a flat V2 `ai-rulez.yaml` (also `.ai-rulez.yaml`, `ai_rulez.yaml` and their `.yml` forms), stops with an error that names the file and exits `1`; run `ai-rulez migrate v5` to convert it (a 2.x or 3.x project goes through ai-rulez 4.x first). A `config.toml` whose `version` is `4.0` stops the same way. `doctor` reports the same file.
 
 Example detection flow:
 
@@ -3021,6 +3079,8 @@ entry in this table (`schema.JSONContracts`).
 | `ai-rulez update --format json` | [`schema/update.schema.json`](https://github.com/Goldziher/ai-rulez/blob/main/schema/update.schema.json) |
 | `ai-rulez sbom --format json` | [`schema/sbom-report.schema.json`](https://github.com/Goldziher/ai-rulez/blob/main/schema/sbom-report.schema.json) |
 | `ai-rulez sign --format json` | [`schema/sign-report.schema.json`](https://github.com/Goldziher/ai-rulez/blob/main/schema/sign-report.schema.json) |
+| `ai-rulez cache status --format json` | [`schema/cache-status.schema.json`](https://github.com/Goldziher/ai-rulez/blob/main/schema/cache-status.schema.json) |
+| `ai-rulez cache clear --format json` | [`schema/cache-clear.schema.json`](https://github.com/Goldziher/ai-rulez/blob/main/schema/cache-clear.schema.json) |
 | `ai-rulez scanners list --format json` | [`schema/scanners-list.schema.json`](https://github.com/Goldziher/ai-rulez/blob/main/schema/scanners-list.schema.json) |
 | `ai-rulez scanners doctor --format json` | [`schema/scanners-doctor.schema.json`](https://github.com/Goldziher/ai-rulez/blob/main/schema/scanners-doctor.schema.json) |
 | `ai-rulez roles list --format json` | [`schema/roles-manifest.schema.json`](https://github.com/Goldziher/ai-rulez/blob/main/schema/roles-manifest.schema.json) |

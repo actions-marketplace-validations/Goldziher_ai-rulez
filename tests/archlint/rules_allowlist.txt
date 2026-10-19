@@ -19,7 +19,7 @@ background internal/govview/approvals.go 2
 background internal/govview/lock.go 2
 background internal/govview/lock_roles.go 1
 background internal/lint/ar_plugin.go 1
-background internal/lint/external_run.go 4
+background internal/lint/external_run.go 1
 background internal/lint/tree.go 2
 background internal/policy/discover.go 1
 background internal/publish/ocipack.go 1
@@ -87,10 +87,11 @@ global cmd/commands/review_semantic.go 2
 global cmd/commands/roles.go 5
 global cmd/commands/root.go 4
 global cmd/commands/sbom.go 3
-global cmd/commands/scan_external.go 5
+global cmd/commands/scan_external.go 8
 global cmd/commands/scanners.go 6
 global cmd/commands/search.go 3
 global cmd/commands/search_index.go 2
+global cmd/commands/session_start.go 1
 global cmd/commands/sign.go 20
 global cmd/commands/sign_trust.go 2
 global cmd/commands/skill.go 11
@@ -238,6 +239,7 @@ global internal/govview/lock.go 1
 global internal/govview/snapshot.go 1
 global internal/guard/guard.go 3
 global internal/harnesslimits/limits.go 3
+global internal/harnessnames/harnessnames.go 1
 global internal/importer/apm.go 3
 global internal/importer/convert.go 2
 global internal/importer/frontmatter.go 4
@@ -258,6 +260,7 @@ global internal/includes/gitauth.go 1
 global internal/includes/gitops.go 2
 global internal/includes/memo.go 1
 global internal/includes/state.go 1
+global internal/judge/assets.go 1
 global internal/lint/analyzer.go 2
 global internal/lint/ar_budget.go 1
 global internal/lint/ar_capability.go 3
@@ -301,6 +304,7 @@ global internal/lint/traps.go 4
 global internal/lint/traps_limits.go 1
 global internal/lint/traps_plan.go 2
 global internal/lint/units.go 1
+global internal/llm/bedrock.go 1
 global internal/llm/judge.go 1
 global internal/llmstxt/docsite.go 2
 global internal/llmstxt/render.go 2

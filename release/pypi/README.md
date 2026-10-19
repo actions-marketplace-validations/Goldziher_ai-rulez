@@ -29,8 +29,8 @@ ai-rulez keeps your rules, context, skills, agents and MCP servers in one `.ai-r
 - **Includes** – Compose from local packages or Git repositories
 - **CRUD operations** – Manage configuration programmatically via CLI or MCP
 - **Lint without a config** – `ai-rulez validate --strict` checks `AGENTS.md`, `SKILL.md`, `.claude/`, `.agents/`, plugin manifests, hooks and MCP files in any repository; `--path`, `--glob` and `--outputs` widen the scope
-- **Judge** – `ai-rulez judge` grades instruction files against a rubric with a model, with no config file and nothing sent without `--allow-llm`
-- **GitHub Action** – `uses: Goldziher/ai-rulez@<ref>` installs a sha256-verified binary in CI
+- **Judge** – `ai-rulez judge` reviews agent configuration for security, quality and governance with verified evidence and optional rubric skills; no project config is required. `--estimate` sends nothing; a real run needs `--allow-llm` or standing consent in your user config.
+- **GitHub Action** – `uses: Goldziher/ai-rulez@v5` installs a sha256-verified binary in CI and accepts optional LLM configuration inputs. The floating `v5` action ref advances after stable v5 publication; set `version` separately to pin the CLI. [Action guide](https://goldziher.github.io/ai-rulez/github-actions/).
 
 ---
 
@@ -65,22 +65,22 @@ uvx ai-rulez init "My Project"
 # Add a rule
 uvx ai-rulez add rule coding-standards --priority high
 
-# Generate configs for all tools
+# Generate configs for the selected tools
 uvx ai-rulez generate
 ```
 
-This creates `CLAUDE.md`, `.cursorrules`, and other native configs from your `.ai-rulez/` directory.
+This generates native configuration for the presets selected during `init`. Shared instructions use `AGENTS.md`; tool-specific content uses paths such as `.cursor/rules/`.
 
 ---
 
 ## Learn More
 
-**[Full Documentation →](https://goldziher.github.io/ai-rulez/)**
+**[Full Documentation →](https://goldziher.github.io/ai-rulez/)** · [Complete feature table](https://github.com/Goldziher/ai-rulez#features)
 
 ---
 
 ## Other Platforms
 
 - **Homebrew** (macOS/Linux) – `brew install goldziher/tap/ai-rulez`
-- **Go** – build from source: `git clone https://github.com/Goldziher/ai-rulez && cd ai-rulez && go build -o ai-rulez ./cmd/ai-rulez`
+- **Go** – clone the repository and run `task build` for a statically linked executable; see [source installation](https://goldziher.github.io/ai-rulez/installation/).
 - **npm** (Node.js) – `pnpm add -g ai-rulez`

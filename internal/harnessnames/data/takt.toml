@@ -1,0 +1,221 @@
+schema = 1
+preset = "takt"
+harness_version = "main @ c87caaba01c0 (latest tag v0.71.0)"
+verified_on = "2026-10-18"
+completeness = "complete"
+severity = "warning"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://github.com/nrslib/takt/tree/c87caaba01c09436c89935c54687670d7b94e23b/builtins/en/facets/instructions"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s2"
+url = "https://github.com/nrslib/takt/tree/c87caaba01c09436c89935c54687670d7b94e23b/builtins/en/facets/knowledge"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s3"
+url = "https://github.com/nrslib/takt/tree/c87caaba01c09436c89935c54687670d7b94e23b/builtins/en/facets/personas"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s4"
+url = "https://github.com/nrslib/takt/blob/c87caaba01c09436c89935c54687670d7b94e23b/docs/workflows.md"
+quote = "bare names are resolved through the facet layers in priority order — project `.takt/facets/<type>/`, then global `~/.takt/facets/<type>/`, then bundled `builtins/{lang}/facets/<type>/`"
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+evidence = "s4"
+user_collision = "user_wins"
+match = "exact"
+names = [
+  "adjudicate-review-findings",
+  "ai-antipattern-fix",
+  "ai-antipattern-review",
+  "apply-fix-plan",
+  "apply-fix-verification",
+  "arbitrate",
+  "architect",
+  "architecture-audit-plan",
+  "architecture-audit-review",
+  "architecture-audit-supervise",
+  "architecture-audit-team-leader",
+  "architecture-review",
+  "audit-security-plan",
+  "audit-security-review",
+  "audit-security-supervise",
+  "audit-security-team-leader",
+  "caccia",
+  "coding-review",
+  "companion-moderate-review",
+  "companion-watch-review",
+  "companion-watch-testing",
+  "cqrs-es-review",
+  "development-implement-with-reports",
+  "development-implementation-completion",
+  "development-maintenance-with-reports",
+  "development-reimplement-with-reports",
+  "development-team-with-reports",
+  "e2e-audit-plan",
+  "e2e-audit-review",
+  "e2e-audit-supervise",
+  "e2e-audit-team-leader",
+  "exec-loop-monitor",
+  "exec-replan",
+  "exec-review",
+  "exec-worker",
+  "fix",
+  "fix-completion-retry",
+  "fix-maintenance",
+  "fix-plan",
+  "fix-plan-from-review-resolution",
+  "fix-replan",
+  "fix-supervisor",
+  "follow-up-ai-antipattern-review",
+  "follow-up-architecture-review",
+  "follow-up-coding-review",
+  "follow-up-cqrs-es-review",
+  "follow-up-frontend-review",
+  "follow-up-review-completion-retry",
+  "follow-up-security-review",
+  "follow-up-testing-review",
+  "frontend-review",
+  "gather-review",
+  "implement",
+  "implement-after-tests",
+  "implement-maintenance",
+  "implement-terraform",
+  "initial-ai-antipattern-review",
+  "initial-review-completion-retry",
+  "loop-analysis",
+  "loop-monitor-reviewers-fix",
+  "manager",
+  "plan",
+  "plan-maintenance",
+  "reanalyze-loop-analysis",
+  "replan-implementation",
+  "request-replan",
+  "research-analyze",
+  "research-dig",
+  "research-plan",
+  "research-supervise",
+  "review-arch",
+  "review-coding",
+  "review-completion-retry",
+  "review-cqrs-es",
+  "review-frontend",
+  "review-loop-analysis",
+  "review-remediation-problem-tracking",
+  "review-security",
+  "review-terraform",
+  "review-test",
+  "scenario-based-fix-plan-from-review-resolution",
+  "scenario-based-fix-replan",
+  "scenario-based-plan",
+  "scenario-based-plan-maintenance",
+  "scenario-based-replan-implementation",
+  "scenario-based-supervise-review-resolution",
+  "scenario-based-verification-replan",
+  "scenario-based-write-tests-first",
+  "security-review",
+  "select-applicable-candidates",
+  "simple-implement",
+  "simple-implement-after-tests",
+  "simple-plan",
+  "simple-review-coding",
+  "simple-supervise",
+  "simple-write-tests-first",
+  "supervise",
+  "supervise-maintenance",
+  "supervise-review-resolution",
+  "team-leader-fix",
+  "team-leader-fix-plan",
+  "team-leader-fix-verification",
+  "team-leader-implement",
+  "testing-review",
+  "unit-audit-plan",
+  "unit-audit-review",
+  "unit-audit-supervise",
+  "unit-audit-team-leader",
+  "verification-replan",
+  "verify-fix",
+  "workflow-maker-create",
+  "workflow-maker-fix",
+  "workflow-maker-review",
+  "write-tests-first",
+]
+
+[[group]]
+kind = "skill"
+source = "s2"
+evidence = "s4"
+user_collision = "user_wins"
+match = "exact"
+names = [
+  "architecture",
+  "backend",
+  "cqrs-es",
+  "e2e-testing",
+  "existing-system",
+  "frontend",
+  "gui",
+  "implementation-semantics",
+  "loop-analysis",
+  "manager",
+  "react",
+  "research",
+  "security",
+  "security-api",
+  "security-data",
+  "security-dependencies",
+  "security-local",
+  "security-web",
+  "takt",
+  "task-decomposition",
+  "terraform-aws",
+  "unit-testing",
+]
+
+[[group]]
+kind = "agent"
+source = "s3"
+evidence = "s4"
+user_collision = "user_wins"
+match = "exact"
+names = [
+  "ai-antipattern-reviewer",
+  "architecture-reviewer",
+  "balthasar",
+  "casper",
+  "coder",
+  "coding-reviewer",
+  "companion-round-adjudicator",
+  "conductor",
+  "cqrs-es-reviewer",
+  "dual-supervisor",
+  "exec-assistant",
+  "exec-worker",
+  "frontend-reviewer",
+  "loop-analysis-reviewer",
+  "loop-analyzer",
+  "manager",
+  "melchior",
+  "planner",
+  "research-analyzer",
+  "research-digger",
+  "research-planner",
+  "research-supervisor",
+  "review-adjudicator",
+  "security-reviewer",
+  "supervisor",
+  "terraform-coder",
+  "terraform-reviewer",
+  "test-planner",
+  "testing-reviewer",
+]

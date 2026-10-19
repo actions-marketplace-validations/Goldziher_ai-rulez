@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Goldziher/ai-rulez/v5/internal/config"
 	"github.com/Goldziher/ai-rulez/v5/internal/generator"
+	"github.com/Goldziher/ai-rulez/v5/internal/gitutil"
 	"github.com/Goldziher/ai-rulez/v5/internal/hooks"
 	"github.com/Goldziher/ai-rulez/v5/internal/logger"
 	"github.com/Goldziher/ai-rulez/v5/internal/okfbridge"
@@ -32,6 +34,11 @@ var InitCmd = &cobra.Command{
 This creates a .ai-rulez/ directory structure with configuration files,
 rules, context, and skills for your selected AI assistants.
 
+With --minimal, init creates only ai-rulez.toml at the project root and no
+.ai-rulez/ directory: a configuration for skills, MCP servers, hooks, lint
+settings and the lock, while the project's own CLAUDE.md and AGENTS.md stay as
+they are.
+
 The global --config-dir names the directory to create (default .ai-rulez; use
 .config/ai-rulez for the .config/ convention). An existing directory is never
 deleted: --force moves it aside to <dir>.bak-<timestamp> first, and --yes only
@@ -46,6 +53,7 @@ func init() {
 	InitCmd.Flags().BoolVar(&skipContentFlag, "skip-content", false, "Skip creating example content files")
 	InitCmd.Flags().StringVar(&fromFlag, "from", "", "Import from existing tool files with convert: importer names or project paths (e.g., 'auto', 'rulesync', '.claude,.cursor')")
 	InitCmd.Flags().String("source", "", "Where the content lives: ai-rulez (the .ai-rulez tree, default) or agents (AGENTS.md and .agents/, configured in .agents/ai-rulez.toml)")
+	InitCmd.Flags().Bool("minimal", false, "Create only ai-rulez.toml at the project root, with no .ai-rulez/ folder (for skills, MCP servers, lint and the lock; your CLAUDE.md and AGENTS.md stay yours)")
 	InitCmd.Flags().BoolVar(&setupHooks, "setup-hooks", false, "Automatically configure git hooks for ai-rulez validation")
 	addYesFlag(InitCmd.Flags(), &autoYes, "Automatically answer yes to prompts (never replaces an existing configuration directory; see --force)")
 	InitCmd.Flags().Bool("force", false, "Replace an existing configuration directory; the old one is kept as <dir>.bak-<timestamp>")
@@ -62,6 +70,9 @@ func initConfigDir() string {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	if minimal, _ := cmd.Flags().GetBool("minimal"); minimal { //nolint:errcheck // the flag is defined above
+		return runInitMinimal(cmd, args)
+	}
 	source, err := initSource(cmd)
 	if err != nil {
 		return failMsg("Invalid --source", err)
@@ -71,6 +82,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	projectName := getProjectName(args)
 	configDir := initConfigDir()
+	if err := prepareRootConfigFile(cmd, "."); err != nil {
+		return failMsg("Refusing to shadow the existing ai-rulez.toml", err)
+	}
 
 	// --from is convert: check the sources first, so a failure leaves an existing
 	// configuration directory alone
@@ -105,7 +119,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	out := outFor(cmd)
-	displaySuccessMessage(out, projectName, configDir)
+	announceInit(out, projectName, configDir)
 	if abs, err := filepath.Abs(configDir); err == nil {
 		noteHandWrittenFiles(filepath.Dir(abs))
 	}
@@ -183,6 +197,17 @@ func prepareExistingConfigDir(cmd *cobra.Command, configDir string) (string, err
 	return backup, nil
 }
 
+// prepareRootConfigFile guards a project configured by ai-rulez.toml in dir: the
+// directory layout init scaffolds would win over that file and silently shadow
+// it. Like an existing configuration directory, the file is replaced only after
+// --force, which keeps it as ai-rulez.toml.bak-<timestamp>.
+func prepareRootConfigFile(cmd *cobra.Command, dir string) error {
+	if !config.IsRootConfigDir(dir) {
+		return nil
+	}
+	return prepareAgentsConfig(cmd, filepath.Join(dir, config.RootConfigFilename))
+}
+
 // initForceFlag reports whether init was given --force.
 func initForceFlag(cmd *cobra.Command) bool {
 	force, err := cmd.Flags().GetBool("force")
@@ -203,7 +228,37 @@ func backupConfigDir(configDir string, now time.Time) (string, error) {
 	if err := os.Rename(configDir, backup); err != nil {
 		return "", oops.Wrapf(err, "move the existing %s/ directory to %s", configDir, backup)
 	}
+	excludeBackupFromGit(backup)
 	return backup, nil
+}
+
+// excludeBackupFromGit lists the backup in the repository's info/exclude, so it never shows up as
+// an untracked directory to commit by accident. It is best effort: outside a repository, or when
+// the file cannot be written, the backup is simply left as it is.
+func excludeBackupFromGit(backup string) {
+	abs, err := filepath.Abs(backup)
+	if err != nil {
+		return
+	}
+	exclude := (gitutil.Git{}).InfoExcludePathContext(cmdContext(), filepath.Dir(abs))
+	if exclude == "" {
+		return
+	}
+	line := filepath.Base(abs) + "/"
+	if data, err := os.ReadFile(exclude); err == nil && strings.Contains("\n"+string(data), "\n"+line+"\n") {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(exclude), 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(exclude, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // git's own exclude file
+	if err != nil {
+		return
+	}
+	defer f.Close() //nolint:errcheck // best effort
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		return
+	}
 }
 
 // nativeRootFiles are the root files generate writes and refuses to overwrite
@@ -468,6 +523,15 @@ func parseDomains(domainsStr string) []string {
 
 // displaySuccessMessage tells what init created and what to do next. It is
 // progress, not a result: it goes to stderr and -q removes it.
+// announceInit prints the human summary of a created directory; under --format json the result
+// document is the only output.
+func announceInit(out render.Out, projectName, configDir string) {
+	if out.JSON() {
+		return
+	}
+	displaySuccessMessage(out, projectName, configDir)
+}
+
 func displaySuccessMessage(out render.Out, projectName, configDir string) {
 	out.Info("Created %s/ for %s\n\n", configDir, projectName)
 	out.Info("Directory structure:\n")
@@ -521,7 +585,16 @@ func shouldOverwriteConfig(filename string) bool {
 	// replacing an existing directory: neither --yes nor a CI or NO_INTERACTIVE
 	// environment may. The prompt is on stderr; a pipe or CI answers no, and the
 	// caller's error names --force.
-	return askYesNo(fmt.Sprintf("Replace existing directory '%s' (it is kept as a backup)? (y/N): ", filename))
+	return confirmReplace(filename, autoYes, askYesNo)
+}
+
+// confirmReplace asks, through ask, whether to replace an existing configuration directory; with
+// --yes it does not ask, because --yes skips prompts and never authorizes a replacement.
+func confirmReplace(filename string, yes bool, ask func(string) bool) bool {
+	if yes {
+		return false
+	}
+	return ask(fmt.Sprintf("Replace existing directory '%s' (it is kept as a backup)? (y/N): ", filename))
 }
 
 func handleHooksSetup() {

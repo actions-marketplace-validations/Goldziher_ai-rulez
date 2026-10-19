@@ -17,6 +17,7 @@ import (
 	"github.com/Goldziher/ai-rulez/v5/internal/lint"
 	"github.com/Goldziher/ai-rulez/v5/internal/logger"
 	"github.com/Goldziher/ai-rulez/v5/internal/okfbridge"
+	"github.com/Goldziher/ai-rulez/v5/internal/safefs"
 	"github.com/samber/oops"
 	"github.com/spf13/viper"
 )
@@ -126,7 +127,7 @@ func checkFlagCombinations() error {
 
 // checkSinceFlags rejects --since, --changed and their limits used wrongly.
 func checkSinceFlags() error {
-	if validateSince != "" && validateChanged {
+	if validateSince != "" && validateChanged != "" {
 		return oops.Errorf("--since and --changed cannot be combined (--changed is --since HEAD)")
 	}
 	if changedRev() == "" && (validateSinceMax != 0 || (validateSinceDepth != "" && validateSinceDepth != "1")) {
@@ -235,15 +236,14 @@ func strictLint(ctx context.Context, cfg *config.Config) (*lint.Report, error) {
 	if outputsRequested(cfg) {
 		opts = append(opts, lint.WithOutputs(generatedOutputFiles(ctx, cfg)))
 	}
-	scanner, err := scannerOptions()
+	scanner, err := scannerOptionsFor(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
-	scanner = withScannerCache(scanner, cfg)
 	report, err := lint.RunWith(cfg, tree, lint.Options{
 		SecurityOnly: strictSecurityOnly, External: validateExtern, AllowEgress: validateAllowEgress,
 		Scanner: scanner, Analyzers: validateAnalyzers, NeedDeps: changedRev() != "", Cwd: workingDir(),
-	}, opts...)
+	}, append(opts, lint.WithContext(ctx))...)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // already contextual
 	}
@@ -334,7 +334,8 @@ func contentLintOptions(ctx context.Context, cfg *config.Config, sel []string) [
 	opts := sbomOptions(cfg, sel)
 	if lint.AnalyzerSelected(sel, lint.AnalyzerTraps) {
 		// The traps judge the files a run would write, whether or not generate has run.
-		opts = append(opts, lint.WithPlanned(generator.NewPlannedFiles(cfg)))
+		planned := generator.NewPlannedFiles(cfg)
+		opts = append(opts, lint.WithPlanned(planned), lint.WithHarnessReach(generator.NewHarnessReach(cfg, planned)))
 	}
 	if lint.AnalyzerSelected(sel, lint.AnalyzerOKF) {
 		opts = append(opts, okfLintOptions(cfg)...)
@@ -439,7 +440,14 @@ type strictVerdict struct {
 // silences or tightens another's. done is true when the run ends before a
 // report exists (--update-baseline).
 func judgeStrict(reports []*lint.Report, cfgs []*config.Config) (verdict strictVerdict, done bool, err error) {
-	excess, done, err := prepareReportsErr(cmdContext(), reports, cfgs)
+	return judgeStrictCtx(cmdContext(), reports, cfgs)
+}
+
+// judgeStrictCtx is judgeStrict on ctx, which a run gives one shared view of the
+// git listings (see beginStrictRun) so the narrowing to the changed files reads
+// the work tree once, with the lint.
+func judgeStrictCtx(ctx context.Context, reports []*lint.Report, cfgs []*config.Config) (verdict strictVerdict, done bool, err error) {
+	excess, done, err := prepareReportsErr(ctx, reports, cfgs)
 	if err != nil || done {
 		return strictVerdict{}, done, err
 	}
@@ -462,10 +470,15 @@ func judgeStrict(reports []*lint.Report, cfgs []*config.Config) (verdict strictV
 
 // reportStrict prints the combined report and returns the process exit code.
 func reportStrict(reports []*lint.Report, cfgs []*config.Config) int {
+	return reportStrictCtx(cmdContext(), reports, cfgs)
+}
+
+// reportStrictCtx is reportStrict on ctx (see judgeStrictCtx).
+func reportStrictCtx(ctx context.Context, reports []*lint.Report, cfgs []*config.Config) int {
 	if scannerDryRun() {
 		return 0 // the scanner plan was printed; nothing ran, so there is no report
 	}
-	verdict, done, err := judgeStrict(reports, cfgs)
+	verdict, done, err := judgeStrictCtx(ctx, reports, cfgs)
 	if err != nil {
 		renderStderr(err)
 		return 1
@@ -584,12 +597,14 @@ func runStrictSingle(cfg *config.Config) int {
 		renderStderr(err)
 		return 1
 	}
-	report, err := strictLint(cmdContext(), cfg)
+	// One read-only run: the git listings (tracked, untracked) are taken once.
+	ctx := withUnmanagedLint(gitutil.WithSharedIndex(cmdContext()))
+	report, err := strictLint(ctx, cfg)
 	if err != nil {
 		renderStderr(err)
 		return 1
 	}
-	return reportStrict([]*lint.Report{report}, []*config.Config{cfg})
+	return reportStrictCtx(ctx, []*lint.Report{report}, []*config.Config{cfg})
 }
 
 // warnUnpinned logs the remote includes and installed skills that follow a
@@ -626,8 +641,9 @@ func warnFrontmatter(ctx context.Context, cfg *config.Config) {
 // enforceScanImports runs the security rules over imported content before
 // anything is written, unless [lint.security] scan_imports is "off". An
 // error-level finding (every finding at level "error") stops the run; the rest
-// are logged.
-func enforceScanImports(cfg *config.Config) error {
+// are logged. An error finding inside one of the accepted trees (pinned with
+// generate --accept-findings in this run) is logged as well.
+func enforceScanImports(cfg *config.Config, accepted []string) error {
 	findings, err := lint.ScanImports(cfg, lint.WithCwd(workingDir()))
 	if err != nil {
 		return oops.Wrapf(err, "scan imported content")
@@ -639,7 +655,7 @@ func enforceScanImports(cfg *config.Config) error {
 	blocked := false
 	for _, f := range findings {
 		lines = append(lines, fmt.Sprintf("%s:%d: %s %s: %s", f.File, f.Line, f.Severity, f.Code, f.Message))
-		if f.Severity == lint.SeverityError {
+		if f.Severity == lint.SeverityError && !withinAny(f.File, accepted) {
 			blocked = true
 		}
 	}
@@ -649,16 +665,27 @@ func enforceScanImports(cfg *config.Config) error {
 		}
 		return nil
 	}
-	return oops.Hint("Review the imported source, or set [lint.security] scan_imports to \"warn\" (or \"off\")").
+	return oops.Hint("Review the imported source, then set trust = \"warn\" on its installed_skills entry, or [lint.security] scan_imports to \"warn\" (or \"off\") for all imports").
 		Errorf("imported content failed the security scan; nothing was written:\n  %s", strings.Join(lines, "\n  "))
+}
+
+// withinAny reports whether file lies inside one of dirs.
+func withinAny(file string, dirs []string) bool {
+	for _, d := range dirs {
+		if d != "" && safefs.Within(d, file) {
+			return true
+		}
+	}
+	return false
 }
 
 // authoredSecretGate refuses to write while the project's own content holds a
 // credential the security scan recognizes (AR001): generated outputs are
 // committed or sent to a model, and content can reach them through a symlink or
 // a copy-paste. An inline ignore comment or a [lint] rule setting silences a
-// reviewed false positive, as it does for `validate --strict`.
-func authoredSecretGate(ctx context.Context, cfg *config.Config) error {
+// reviewed false positive, as it does for `validate --strict`. A tree in
+// accepted (pinned with generate --accept-findings in this run) is not refused.
+func authoredSecretGate(ctx context.Context, cfg *config.Config, accepted []string) error {
 	if cfg.BaseDir == "" {
 		return nil
 	}
@@ -667,13 +694,13 @@ func authoredSecretGate(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return oops.Wrapf(err, "index content for the secret scan")
 	}
-	report, err := lint.RunWith(cfg, tree, lint.Options{SecurityOnly: true, SecretsOnly: true})
+	report, err := lint.RunWith(cfg, tree, lint.Options{SecurityOnly: true, SecretsOnly: true}, lint.WithContext(ctx))
 	if err != nil {
 		return oops.Wrapf(err, "scan content for secrets")
 	}
 	var lines []string
 	for _, f := range report.Findings {
-		if f.Code == lint.CodeSecretDetected && f.Severity == lint.SeverityError {
+		if f.Code == lint.CodeSecretDetected && f.Severity == lint.SeverityError && !withinAny(f.File, accepted) {
 			lines = append(lines, fmt.Sprintf("%s:%d: %s %s: %s", f.File, f.Line, f.Severity, f.Code, f.Message))
 		}
 	}

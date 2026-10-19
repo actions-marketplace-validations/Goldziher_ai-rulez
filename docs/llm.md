@@ -1,6 +1,6 @@
 # LLM access
 
-`internal/llm.Client` is the one Go interface for reaching a language model, so the provider, the cost controls and the privacy rules live in one place. Its consumers are the rubric grader of `eval run`, `review --semantic`, `review calibrate`, `review fix` and `review explain`, the LLM-backed `[[verifiers]]` and `verifiers suggest`, the `review-fix` adapter of `improve run`, the embeddings behind `search` (skill search index), and the diagnostics `llm doctor` (and its `--ping`) and the `llm` section of `ai-rulez doctor`.
+`internal/llm.Client` is the one Go interface for reaching a language model, so the provider, the cost controls and the privacy rules live in one place. Its consumers are [`judge`](judge.md) (the three reviewers and the adjudicator), the rubric grader of `eval run`, `review --semantic`, `review calibrate`, `review fix` and `review explain`, the LLM-backed `[[verifiers]]` and `verifiers suggest`, the `review-fix` adapter of `improve run`, the embeddings behind `search` (skill search index), and the diagnostics `llm doctor` (and its `--ping`) and the `llm` section of `ai-rulez doctor`.
 
 **Nothing calls a model unless you turn it on.** `allow_network` defaults to `false`; every call is refused with a message that names the setting.
 
@@ -50,7 +50,10 @@ or export `AI_RULEZ_LLM_ALLOW_NETWORK=1` (and `_BASE_URL`, `_API_KEY_ENV`). Prec
 
 ### Environment overrides
 
-`AI_RULEZ_LLM_PROVIDER`, `_MODEL`, `_BACKEND`, `_BASE_URL`, `_API_KEY_ENV`, `_EMBEDDING_MODEL`, `_MAX_COST_USD`, `_MAX_TOKENS`, `_MAX_CALLS`, `_TIMEOUT_SECONDS`, `_CACHE`, `_ALLOW_NETWORK`, `_ALLOW_PLAIN_HTTP`, `_PLAIN_HTTP_HOSTS` (comma-separated), `_PRICE_INPUT_PER_MTOK`, `_PRICE_OUTPUT_PER_MTOK` (the price override for the model named by `_MODEL`) and `_TEMPERATURE` (`omit` leaves `temperature` out of every request; env only, no config key). An environment value wins over the config file. An unparsable value is an `AR9L0` error, not a silent default.
+`AI_RULEZ_LLM_PROVIDER`, `_MODEL`, `_BASE_URL`, `_API_KEY_ENV`, `_EMBEDDING_MODEL`, `_MAX_COST_USD`, `_MAX_TOKENS`, `_MAX_CALLS`, `_TIMEOUT_SECONDS`, `_CACHE`, `_ALLOW_NETWORK`, `_ALLOW_PLAIN_HTTP`, `_PLAIN_HTTP_HOSTS` (comma-separated), `_PRICE_INPUT_PER_MTOK`, `_PRICE_OUTPUT_PER_MTOK` (the price override for the model named by `_MODEL`) and `_TEMPERATURE` (`omit` leaves `temperature` out of every request; env only, no config key; a Claude 5.x model never gets one, whatever the setting). An environment value wins over the config file. An unparsable value is an `AR9L0` error, not a silent default.
+
+The [official GitHub Action](github-actions.md) accepts matching `llm-*` inputs and exports them
+for later command steps. Credentials belong in the command step's or job's environment.
 
 ### Validation: `AR9L0 llm-config-invalid`
 
@@ -81,6 +84,9 @@ ai-rulez llm estimate <file>            approximate tokens and worst-case cost o
 
 `llm doctor` is also a section of `ai-rulez doctor` (check `llm`, silent when there is no `[llm]` table). `--ping` makes one 1-token call and refuses unless `allow_network` is true.
 
+`llm doctor` requires a project configuration; `llm estimate` can use only the user configuration
+and environment when no project exists.
+
 ## What it does for every call
 
 Outermost first: network gate and timeout, cache, budget, liter-llm (which retries inside the call).
@@ -95,11 +101,15 @@ Outermost first: network gate and timeout, cache, budget, liter-llm (which retri
 
 ## Data egress and residency
 
-When `allow_network` is true, the prompt text of each feature is sent to the configured endpoint. What that is depends on the caller. Today only `llm doctor --ping` sends anything (a one-token `ping`). For a future judge-style feature it would be a rubric and the transcript of an agent session, which can contain source code, file paths, tool output and anything a user typed. ai-rulez adds no other data, and never sends config files, keys or environment.
+When `allow_network` is true, the prompt text of each feature is sent to the configured endpoint. What that is depends on the caller. `llm doctor --ping` sends a one-token `ping`. [`judge`](judge.md) sends the files it reviews (and, for governance, the rules and `CLAUDE.md` files that apply to them) and says so first, with the egress host and the models, and only with `--allow-llm`. A rubric grader sends a transcript of an agent session, which can contain source code, file paths, tool output and anything a user typed. ai-rulez adds no other data, and never sends config files, keys or environment.
 
 To keep data inside your network, point `base_url` at a gateway you run (a LiteLLM proxy, a Bedrock or Azure OpenAI gateway in your VPC, Ollama or vLLM on an internal host) and use `api_key_env` for the gateway credential. `llm doctor` shows the host so a reviewer can check it. liter-llm 2.2.2 and later refuse HTTP redirects: a gateway that answers 307 or 308 surfaces as a provider error and the prompt is never re-sent to the redirect target (`TestRedirectsAreNotFollowed`). Only point `base_url` at a host you trust. `base_url` must not embed credentials or a query string (`AR9L0`). The default endpoint (used only when `provider` is `openai` or empty and no `base_url` is set) is `https://api.openai.com/v1`. A key is sent only as an `Authorization: Bearer` header to that host, and only over `https` unless the host is loopback. `base_url`, `allow_network` and `api_key_env` are honoured only from user scope (see the trust rule above).
 
 Model-side retention and training terms are the provider's; check them before sending transcripts that contain private code.
+
+### Amazon Bedrock
+
+A `bedrock/...` model is signed with AWS credentials, resolved through the AWS SDK's default chain for **every** command that calls a model (`judge`, `eval`, `verifiers`, `review`, `improve`, `search`): environment variables, `AWS_PROFILE` and the shared config (SSO and assume-role profiles included), web identity (`AWS_WEB_IDENTITY_TOKEN_FILE`), and container and instance roles. A Bedrock API key (`AWS_BEARER_TOKEN_BEDROCK`) or a key pair already in the environment is used as it is. The SDK's credential cache renews temporary credentials before they expire, ai-rulez puts the current keys where liter-llm reads them before each call (calls in flight finish first), and a call refused as unauthenticated renews the credentials and is tried once more, so a run longer than a session does not fail halfway. The region comes from `AWS_REGION`, `AWS_DEFAULT_REGION` or the `AWS_PROFILE` profile, and the egress host is `bedrock-runtime.<region>.amazonaws.com`. A Claude 5.x model on Bedrock takes no `temperature`: it is left out of the request up front, not retried after a 400.
 
 ### Cost controls
 
@@ -148,15 +158,15 @@ The binding is cgo over a Rust library, so a build needs `CGO_ENABLED=1`, a C to
 
 A cgo `#cgo LDFLAGS` shim inside the repository cannot replace the environment variable: the binding's own `-L` and `-lliter_llm_ffi` come first on the link line and resolve to the shared library the module ships, so the binary keeps a load command for it (checked on macOS arm64; `-Wl,-dead_strip_dylibs`, which would drop it, is not allowed in `#cgo` flags). That is why `scripts/setup-liter-llm.sh` supplies the static archive through `CGO_LDFLAGS` rather than an in-repo cgo shim.
 
-Verified against liter-llm (macOS arm64 on the pinned v2.2.3; the other rows on v2.2.0):
+Verification history for liter-llm (the current pin is v2.2.4; earlier platform checks retain their tested versions):
 
 | Platform | Result | Verified on |
 | --- | --- | --- |
-| macOS arm64 | static link, one 42 MB executable, `otool -L` lists system libraries only; tests pass | v2.2.3 |
-| Linux arm64 (glibc, Debian bookworm container) | static link, 43 MB, `ldd` lists libm, libgcc_s and libc only | v2.2.0 |
-| Linux x86_64, macOS x86_64 | same asset layout; built by the release workflow on native runners | v2.2.0 |
-| Windows x86_64 | not verifiable from a macOS host: the asset's static `.lib` is an MSVC archive while Go's cgo uses MinGW; the release workflow builds and smoke-tests it on a Windows runner and falls back to shipping `liter_llm_ffi.dll` beside `ai-rulez.exe` | v2.2.0 |
-| Windows arm64, Linux musl | liter-llm v2.2.3 now ships `windows-aarch64` and `linux-*-musl` assets (#267 closed), and its release workflow builds and tests each; ai-rulez has not linked or verified them, and its release matrix stays the five platforms above (Linux glibc only, so a musl-based image needs the glibc binary) | not verified |
+| macOS arm64 | static link; full Go tests, race checks and a live OpenAI smoke test pass | v2.2.4 |
+| Linux arm64 (glibc, Debian bookworm container) | release archive and smoke test pass; static liter-llm link, `ldd` lists libm, libgcc_s and libc only; highest required symbol is `GLIBC_2.34` | v2.2.4 |
+| Linux x86_64, macOS x86_64 | native release builds and smoke tests passed in the [v5.3.0 publish run](maintainers/release.md#platform-matrix) | v2.2.3 |
+| Windows x86_64 | archive packaging and smoke tests passed in the [v5.3.0 publish run](maintainers/release.md#windows); packaging can fall back to `liter_llm_ffi.dll` beside `ai-rulez.exe` when static linking fails | v2.2.3 |
+| Windows arm64, Linux musl | liter-llm v2.2.3 now ships `windows-aarch64` and `linux-*-musl` assets (#267 closed), and its release workflow builds and tests each; ai-rulez has not linked or verified them, and its release matrix stays the five platforms above (Linux glibc only; musl-based images are unsupported) | not verified |
 
 Binary size grows by about 35 MB per platform. The release workflow, glibc floor and the wrappers (npm, PyPI, Homebrew) are described in [maintainers/release.md](maintainers/release.md).
 
@@ -164,13 +174,15 @@ Binary size grows by about 35 MB per platform. The release workflow, glibc floor
 
 liter-llm is MIT licensed (Copyright 2026 Kreuzberg, Inc.). The Go module is a wrapper around a Rust library whose dependency tree carries other licenses (its `deny.toml` allows Apache-2.0, MIT, BSD, ISC, Zlib, MPL-2.0, OpenSSL, among others), and its provider table is derived from LiteLLM's (MIT, attribution in liter-llm's `ATTRIBUTIONS.md`). Every release binary now bundles that code: ship the MIT notice and the third-party notices of the library with it.
 
-Version pin: `github.com/xberg-io/liter-llm/packages/go/v2 v2.2.3` in `go.mod`. v2.2.0 or later is required for exact Gemini thinking-token accounting (`module_test.go` pins that floor).
+Version pin: `github.com/xberg-io/liter-llm/packages/go/v2 v2.2.4` in `go.mod`. v2.2.0 or later is required for exact Gemini thinking-token accounting (`module_test.go` pins that floor).
 
 ### Testing
 
 The `internal/llm` tests run the real liter-llm client against local `httptest` servers: no network and no key. With a `base_url` liter-llm keeps the named provider's transform, so the Gemini (native and Vertex) and OpenAI request and usage mappings are asserted offline against a local server (`TestProviderTransformIsKeptWithABaseURL`); Bedrock is liter-llm's own tests' job. The live tests (`AI_RULEZ_LIVE_LLM=1`, `GEMINI_API_KEY`) cover Gemini end to end and are not part of PR CI; the `live-llm` job in `.github/workflows/live.yml` runs `go test ./internal/llm/... ./internal/evals/...` on `workflow_dispatch` and a weekly schedule. It needs the `GEMINI_API_KEY` repository secret (and optionally `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`, unused by the current tests), writes its transcripts to `AI_RULEZ_LIVE_OUT` and uploads them with the test log as an artifact.
 
-Verified live on 2026-10-10 against the pinned liter-llm v2.2.3: `AI_RULEZ_LIVE_LLM=1` with `GEMINI_API_KEY`, chat model `gemini-2.5-flash-lite` and embedding model `gemini-embedding-001`; `go test ./internal/llm/... ./internal/evals/...` passes. Thinking-token settlement charged the reply's reported `total_tokens` (prompt 35, completion 414). That run also exposed a live-only test bug, since fixed: `TestLiveBudgetMaxCallsAndUnknownPriceWithCostCap` used a priced model for its unknown-price branch, so the branch never exercised an unpriced model.
+Verified live on 2026-10-10 against liter-llm v2.2.3: `AI_RULEZ_LIVE_LLM=1` with `GEMINI_API_KEY`, chat model `gemini-2.5-flash-lite` and embedding model `gemini-embedding-001`; `go test ./internal/llm/... ./internal/evals/...` passes. Thinking-token settlement charged the reply's reported `total_tokens` (prompt 35, completion 414). That run also exposed a live-only test bug, since fixed: `TestLiveBudgetMaxCallsAndUnknownPriceWithCostCap` used a priced model for its unknown-price branch, so the branch never exercised an unpriced model.
+
+On 2026-10-16, the statically linked v2.2.4 build passed the full Go suite, race checks and a live OpenAI smoke test.
 
 ## Using it from a feature
 
@@ -184,4 +196,4 @@ defer client.Close()
 v, err := llm.Judge(ctx, client, rubric, transcript)   // v.Score in [0,1], v.Rationale
 ```
 
-`llm.Judge` uses structured output at temperature 0 (omitted for an OpenAI reasoning model, which rejects any temperature but its default, when `AI_RULEZ_LLM_TEMPERATURE=omit` is set, and, after one retry, once a provider answers HTTP 400 about `temperature`) and `llm.JudgePromptVersion` as the cache version. It asks for at least `llm.DefaultJudgeCompletionTokens` (2048) completion tokens, because a reasoning model spends its thinking out of that budget before the verdict (`JudgeOptions.MinCompletionTokens` raises it). Change the judge prompt or schema and bump that constant. The transcript is sent as data between two marker lines that carry a token derived from the request's own content (so the transcript cannot predict or close it), and the system prompt tells the model to ignore instructions inside it. The reply must be exactly one JSON object with both `score` (in [0,1]) and `rationale`; anything else is a provider error, and a reply that fails that check is never written to the cache (a cached one is treated as a miss). Before sending, the rubric and transcript are scanned for secret-looking text (bearer tokens, `sk-...`, `AKIA...`, `api_key=...`, and every credential shape the security scan `AR001` recognises, such as `AIza...`, `ghp_...`, `xoxb-...` and private key blocks); `Judge` refuses when it finds any, and `llm.JudgeWith(..., llm.JudgeOptions{RedactSecrets: true})` sends them masked instead. The scan is a pattern match, not a guarantee. A feature must treat `errors.Is(err, llm.ErrNetworkDisabled)` as "refuse with a clear message" and `llm.ErrDryRun` as "skipped". In tests use `llm.NewFake()` (deterministic, no network) and `llm.Wrap(fake, cfg, opts)` to get the real middleware around it.
+`llm.Judge` uses structured output at temperature 0 (omitted for an OpenAI reasoning model, which rejects any temperature but its default, for a Claude 5.x model, when `AI_RULEZ_LLM_TEMPERATURE=omit` is set, and, after one retry, once a provider answers HTTP 400 about `temperature`) and `llm.JudgePromptVersion` as the cache version. It asks for at least `llm.DefaultJudgeCompletionTokens` (2048) completion tokens, because a reasoning model spends its thinking out of that budget before the verdict (`JudgeOptions.MinCompletionTokens` raises it). Change the judge prompt or schema and bump that constant. The transcript is sent as data between two marker lines that carry a token derived from the request's own content (so the transcript cannot predict or close it), and the system prompt tells the model to ignore instructions inside it. The reply must be exactly one JSON object with both `score` (in [0,1]) and `rationale`; anything else is a provider error, and a reply that fails that check is never written to the cache (a cached one is treated as a miss). Before sending, the rubric and transcript are scanned for secret-looking text (bearer tokens, `sk-...`, `AKIA...`, `api_key=...`, and every credential shape the security scan `AR001` recognises, such as `AIza...`, `ghp_...`, `xoxb-...` and private key blocks); `Judge` refuses when it finds any, and `llm.JudgeWith(..., llm.JudgeOptions{RedactSecrets: true})` sends them masked instead. The scan is a pattern match, not a guarantee. A feature must treat `errors.Is(err, llm.ErrNetworkDisabled)` as "refuse with a clear message" and `llm.ErrDryRun` as "skipped". In tests use `llm.NewFake()` (deterministic, no network) and `llm.Wrap(fake, cfg, opts)` to get the real middleware around it.

@@ -1,0 +1,416 @@
+schema = 1
+preset = "codewhale"
+harness_version = "v0.10.1"
+verified_on = "2026-10-18"
+completeness = "partial"
+severity = "warning"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://github.com/codewhale-hq/Codewhale/tree/v0.10.1/crates/tui/src/commands/groups"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s2"
+url = "https://github.com/codewhale-hq/Codewhale/blob/v0.10.1/crates/tui/assets/skills-catalog-matrix.json"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s3"
+url = "https://github.com/codewhale-hq/Codewhale/blob/v0.10.1/docs/SUBAGENTS.md"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s4"
+url = "https://github.com/codewhale-hq/Codewhale/blob/v0.10.1/crates/tui/src/commands/user_registry.rs"
+quote = "Workspace command '/{}' would replace a protected built-in command and was not loaded; rename it"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s5"
+url = "https://github.com/codewhale-hq/Codewhale/blob/v0.10.1/crates/tui/src/commands/user_registry.rs"
+quote = "fn dispatch_prefers_user_command_over_builtin_with_same_name() {"
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+evidence = "s5"
+user_collision = "user_wins"
+match = "exact"
+names = [
+  "advisor",
+  "agent",
+  "anchor",
+  "attach",
+  "automation",
+  "balance",
+  "branch",
+  "cache",
+  "change",
+  "clear",
+  "compact",
+  "context",
+  "copy",
+  "cost",
+  "diff",
+  "dispatch",
+  "edit",
+  "effort",
+  "exit",
+  "export",
+  "feedback",
+  "fleet",
+  "fork",
+  "fullscreen",
+  "goal",
+  "help",
+  "hf",
+  "home",
+  "hotbar",
+  "import-claude",
+  "init",
+  "inline",
+  "jobs",
+  "lane",
+  "links",
+  "load",
+  "lsp",
+  "memory",
+  "model",
+  "modeldb",
+  "models",
+  "new",
+  "note",
+  "overview",
+  "pet",
+  "pin",
+  "preview-request",
+  "queue",
+  "receipts",
+  "rename",
+  "resume",
+  "retry",
+  "review",
+  "rlm",
+  "router",
+  "save",
+  "skill",
+  "skills",
+  "stash",
+  "status",
+  "statusline",
+  "structcopy",
+  "subagents",
+  "task",
+  "theme",
+  "title",
+  "tokens",
+  "tools",
+  "transcript",
+  "translate",
+  "tree",
+  "turn",
+  "verbose",
+  "voice",
+  "voicecontrol",
+  "voicesend",
+  "workbar",
+  "workflow",
+  "workflows",
+]
+aliases = { "advisor" = [
+  "watch",
+  "watchers",
+], "agent" = [
+  "daili",
+], "anchor" = [
+  "maodian",
+], "attach" = [
+  "fujian",
+  "image",
+  "media",
+], "automation" = [
+  "automations",
+  "scheduled",
+], "clear" = [
+  "qingping",
+], "compact" = [
+  "yasuo",
+], "context" = [
+  "ctx",
+], "dispatch" = [
+  "cloud-agent",
+  "cloud-dispatch",
+], "effort" = [
+  "reason",
+  "reasoning",
+  "thinking",
+], "exit" = [
+  "q",
+  "quit",
+  "tuichu",
+], "export" = [
+  "daochu",
+], "fork" = [
+  "f",
+], "help" = [
+  "?",
+  "bangzhu",
+  "帮助",
+], "hf" = [
+  "huggingface",
+], "home" = [
+  "shouye",
+  "zhuye",
+], "hotbar" = [
+  "hotkeys",
+], "import-claude" = [
+  "import_claude",
+], "jobs" = [
+  "job",
+  "zuoye",
+], "lane" = [
+  "lanes",
+], "links" = [
+  "api",
+  "dashboard",
+  "lianjie",
+], "load" = [
+  "jiazai",
+], "model" = [
+  "moxing",
+  "route",
+], "modeldb" = [
+  "model-reference",
+  "modelref",
+], "models" = [
+  "moxingliebiao",
+], "overview" = [
+  "stats",
+], "pin" = [
+  "mini",
+  "window-pin",
+], "preview-request" = [
+  "dryrun",
+  "preview_request",
+], "queue" = [
+  "queued",
+], "receipts" = [
+  "receipt",
+], "rename" = [
+  "chongmingming",
+  "gaiming",
+], "resume" = [
+  "r",
+], "retry" = [
+  "chongshi",
+], "review" = [
+  "shencha",
+], "rlm" = [
+  "digui",
+  "recursive",
+], "skill" = [
+  "jineng",
+], "skills" = [
+  "jinengliebiao",
+], "stash" = [
+  "park",
+], "subagents" = [
+  "agents",
+  "zhinengti",
+], "task" = [
+  "tasks",
+], "title" = [
+  "tabtitle",
+  "window-title",
+], "tools" = [
+  "tool-studio",
+], "translate" = [
+  "transale",
+  "translation",
+], "turn" = [
+  "turns",
+], "voice" = [
+  "yuyin",
+  "语音",
+], "voicecontrol" = [
+  "voice-control",
+  "yuyincontrol",
+  "语音控制",
+], "voicesend" = [
+  "voice-send",
+  "yuyinsend",
+  "语音发送",
+], "workbar" = [
+  "rail",
+  "sidebar",
+], "workflow" = [
+  "wf",
+] }
+
+[[group]]
+kind = "command"
+source = "s1"
+evidence = "s4"
+user_collision = "builtin_wins"
+match = "exact"
+names = [
+  "auth",
+  "auto",
+  "config",
+  "constitution",
+  "hooks",
+  "login",
+  "logout",
+  "mcp",
+  "mode",
+  "network",
+  "permissions",
+  "plugin",
+  "profile",
+  "provider",
+  "purge",
+  "rc",
+  "relay",
+  "remote-env",
+  "restore",
+  "sessions",
+  "settings",
+  "setup",
+  "share",
+  "system",
+  "trust",
+  "undo",
+  "update",
+  "workspace",
+]
+aliases = { "constitution" = [
+  "law",
+], "hooks" = [
+  "gouzi",
+  "hook",
+], "mcp" = [
+  "mcps",
+], "mode" = [
+  "jihua",
+  "zidong",
+], "permissions" = [
+  "permission-rules",
+  "permission_rules",
+], "plugin" = [
+  "extensions",
+  "plugins",
+], "profile" = [
+  "dangan",
+], "purge" = [
+  "qingchu",
+], "rc" = [
+  "remote-control",
+], "relay" = [
+  "batonpass",
+  "接力",
+], "system" = [
+  "xitong",
+], "trust" = [
+  "xinren",
+], "update" = [
+  "upgrade",
+], "workspace" = [
+  "cwd",
+] }
+
+[[group]]
+kind = "skill"
+source = "s2"
+user_collision = "unknown"
+match = "exact"
+names = [
+  "batch",
+  "best-of-n",
+  "dataviz",
+  "debug",
+  "delegate",
+  "dependency-update",
+  "document",
+  "documents",
+  "docx",
+  "fleet-manager",
+  "flights",
+  "forget",
+  "frontend-design",
+  "github",
+  "gmail",
+  "goals",
+  "google-calendar",
+  "handoff",
+  "help",
+  "image-search",
+  "implement",
+  "interview",
+  "mcp-builder",
+  "mcp-discovery",
+  "money",
+  "pdf",
+  "photos",
+  "plan",
+  "plugin-creator",
+  "podcast",
+  "pptx",
+  "presentations",
+  "release",
+  "research",
+  "review",
+  "security-review",
+  "shopping",
+  "simplify",
+  "skill-creator",
+  "skill-installer",
+  "spotify",
+  "spreadsheets",
+  "test",
+  "tts",
+  "verify",
+  "webapp-testing",
+  "xlsx",
+]
+
+[[group]]
+kind = "agent"
+source = "s3"
+user_collision = "n/a"
+match = "exact"
+names = ["advisor", "custom", "explore", "general", "implement", "planner", "reviewer", "test"]
+aliases = { "advisor" = [
+  "consultant",
+  "oracle",
+], "explore" = [
+  "exploration",
+  "explorer",
+  "scout",
+], "general" = [
+  "default",
+  "general-purpose",
+  "general_purpose",
+  "worker",
+], "implement" = [
+  "builder",
+  "implementation",
+  "implementer",
+], "planner" = [
+  "awaiter",
+  "plan",
+  "planning",
+], "reviewer" = [
+  "code-review",
+  "code_review",
+  "review",
+], "test" = [
+  "tester",
+  "validator",
+  "verification",
+  "verifier",
+  "verify",
+] }

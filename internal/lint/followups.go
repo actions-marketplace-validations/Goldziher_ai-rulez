@@ -241,13 +241,14 @@ func (r *runner) checkCollapsed() {
 	for _, a := range r.lc.AllowOverrides {
 		allow[strings.ToLower(strings.TrimSpace(a))] = true
 	}
+	r.checkRepoSkillCollapsed(allow, configDir, authored)
 	for _, dup := range presets.CollapsedDuplicates(r.cfg.Content) {
 		name := strings.ToLower(dup.Name)
 		paths := append([]string{dup.Winner}, dup.Losers...)
 		if allow[name] {
 			continue
 		}
-		if collapseAllowed(allow, name, paths, configDir, authored) {
+		if presets.CollapseAllowed(allow, name, paths, configDir, authored) {
 			continue
 		}
 		anchor := dup.Winner
@@ -264,6 +265,58 @@ func (r *runner) checkCollapsed() {
 			dup.Kind, dup.Name, r.labelPath(dup.Winner), r.labelPaths(dup.Losers), dup.Name)
 	}
 }
+
+// checkRepoSkillCollapsed reports a hand-written skill (a discovered repository
+// skill such as .claude/skills/<name>) that has the name of a skill the
+// configuration defines. Serving keeps one: the repository skill beats a
+// builtin, the configured skill beats the repository skill. The same
+// lint.allow_overrides entries silence it as for any other duplicate.
+func (r *runner) checkRepoSkillCollapsed(allow map[string]bool, configDir, authored string) {
+	defined := r.definedSkills()
+	for i := range r.items {
+		repo := &r.items[i]
+		if repo.kind != kindSkill || repo.isDoc || !repo.targetOnly {
+			continue
+		}
+		name := strings.ToLower(itemID(repo.kind, repo.cf))
+		other, ok := defined[name]
+		if !ok || allow[name] {
+			continue
+		}
+		winner, loser := repo.abs, other.cf.Path
+		if !isBuiltinItem(other) {
+			winner, loser = other.abs, repo.abs // a configured skill outranks a repository skill
+		}
+		if presets.CollapseAllowed(allow, name, []string{winner, loser}, configDir, authored) {
+			continue
+		}
+		if !isBuiltinItem(other) && filepath.IsAbs(other.abs) {
+			r.dep(repo.abs, other.abs)
+		}
+		id := itemID(repo.kind, repo.cf)
+		r.add(CodeDuplicateCollapsed, repo.abs, 1, "skill %q is defined in %s (kept) and %s (dropped); rename one, or list %q in lint.allow_overrides if the shadowing is intended",
+			id, r.labelPath(winner), r.labelPath(loser), id)
+	}
+}
+
+// definedSkills maps a skill name to the configured skill that holds it: a
+// builtin only when nothing else has the name.
+func (r *runner) definedSkills() map[string]*item {
+	defined := map[string]*item{}
+	for i := range r.items {
+		it := &r.items[i]
+		if it.kind != kindSkill || it.isDoc || it.targetOnly {
+			continue
+		}
+		name := strings.ToLower(itemID(it.kind, it.cf))
+		if prev, ok := defined[name]; !ok || (isBuiltinItem(prev) && !isBuiltinItem(it)) {
+			defined[name] = it
+		}
+	}
+	return defined
+}
+
+func isBuiltinItem(it *item) bool { return strings.HasPrefix(it.cf.Path, "builtin://") }
 
 func (r *runner) labelPath(p string) string {
 	if label, ok := includeCacheLabel(p); ok {
@@ -296,40 +349,6 @@ func (r *runner) labelPaths(paths []string) string {
 		out[i] = r.labelPath(p)
 	}
 	return strings.Join(out, ", ")
-}
-
-// collapseAllowed reports whether lint.allow_overrides lists a copy of name by its
-// scope (a domain, "import"...). sourceDir is where the scopes are rooted;
-// authored is the project's own content root, which also holds the root
-// AGENTS.md of an "agents" source outside .agents.
-func collapseAllowed(allow map[string]bool, name string, paths []string, sourceDir, authored string) bool {
-	for _, p := range paths {
-		scope := scopeOf(p, sourceDir)
-		if scope == "import" && filepath.IsAbs(p) && safefs.Within(authored, p) {
-			scope = ""
-		}
-		if scope != "" && allow[scope+"/"+name] {
-			return true
-		}
-	}
-	return false
-}
-
-// scopeOf names where a copy lives: its domain, "builtin" for an embedded file,
-// "import" for content outside this config directory, "" for root content.
-func scopeOf(p, configDir string) string {
-	if !filepath.IsAbs(p) {
-		return "builtin"
-	}
-	rel, err := filepath.Rel(configDir, p)
-	if err != nil || safefs.RelEscapes(rel) {
-		return "import"
-	}
-	parts := strings.Split(filepath.ToSlash(rel), "/")
-	if len(parts) > 2 && parts[0] == "domains" {
-		return parts[1]
-	}
-	return ""
 }
 
 // namesTOMLString reports whether the line holds name as a basic ("name") or
@@ -466,6 +485,7 @@ func ScanImports(cfg *config.Config, opts ...Option) ([]Finding, error) {
 	r.resolveSettings()
 	r.collect()
 	r.scanImported()
+	r.scanPluginFiles()
 	sort.SliceStable(r.findings, func(i, j int) bool {
 		if r.findings[i].File != r.findings[j].File {
 			return r.findings[i].File < r.findings[j].File

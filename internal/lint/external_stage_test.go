@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/Goldziher/ai-rulez/v5/internal/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const stagedSkill = "---\nname: deploy\ndescription: Use when deploying the service to production.\n---\n# Deploy\n\nRun the script.\n"
@@ -109,11 +111,12 @@ func TestStagedInputsAreTheOnlyFilesTheScannerSees(t *testing.T) {
 	script := `MSG="cwd=$(pwd | sed 's:.*/::') files=$(find . -type f | sort | tr '\n' ' ') home=$(echo "$HOME" | sed 's:.*/::') ` +
 		`writable=$([ -w . ] && echo yes || echo no) filewritable=$([ -w .ai-rulez/skills/deploy/SKILL.md ] && echo yes || echo no)"` + "\n" + sarifMessage
 	tests := []struct {
-		name     string
-		inputs   string
-		want     []string
-		notWant  []string
-		wantSkip bool
+		name    string
+		inputs  string
+		want    []string
+		notWant []string
+		// nonRoot marks a case that asserts a read-only stage, which root can still write to.
+		nonRoot bool
 	}{
 		{
 			name: "skills only", inputs: `["skills"]`,
@@ -122,6 +125,7 @@ func TestStagedInputsAreTheOnlyFilesTheScannerSees(t *testing.T) {
 				"./.ai-rulez/skills/deploy/references/note.md", "home=home", "writable=no", "filewritable=no",
 			},
 			notWant: []string{".env", "main.go", "config.toml", "rules/r.md"},
+			nonRoot: true,
 		},
 		{
 			name: "rules and skills", inputs: `["rules", "skills"]`,
@@ -131,6 +135,9 @@ func TestStagedInputsAreTheOnlyFilesTheScannerSees(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.nonRoot && os.Geteuid() == 0 {
+				t.Skip("root can write to a read-only stage, so writable=no cannot hold")
+			}
 			p := newScannerProject(t, script, "egress = false\ninputs = "+tt.inputs+"\n", nil)
 			// Act
 			findings := p.run(Options{})
@@ -574,5 +581,130 @@ func TestStagedMCPRedactsArgumentsAndURLs(t *testing.T) {
 	}
 	if got := redactStageURL("https://user:pw@host.example/mcp?key=abc#frag"); got != "https://host.example/mcp" {
 		t.Fatalf("url = %q", got)
+	}
+}
+
+func TestSkillRelativeResultsResolveAgainstTheBatchsOwnSkills(t *testing.T) {
+	// Arrange: a scanner that prints a uri relative to the skill it was handed.
+	script := `printf '{"version":"2.1.0","runs":[{"results":[{"ruleId":"X1","level":"warning","message":{"text":"found"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"SKILL.md"},"region":{"startLine":1}}}]}]}]}'` + "\n"
+	other := map[string]string{".ai-rulez/skills/other/SKILL.md": fakeSkill("other")}
+	tests := []struct {
+		name      string
+		keys      string
+		wantFiles []string
+		wantDrop  string
+		wantSev   Severity
+	}{
+		{
+			name:      "batch_size 1 resolves each batch against its own skill",
+			keys:      "egress = false\ninputs = [\"skills\"]\nbatch_size = 1\nargs = \"{skill_dirs}\"\n",
+			wantFiles: []string{".ai-rulez/skills/deploy/SKILL.md", ".ai-rulez/skills/other/SKILL.md"},
+		},
+		{
+			name:     "a multi-skill batch stays ambiguous and every result dropped is an error",
+			keys:     "egress = false\ninputs = [\"skills\"]\nargs = \"{skill_dirs}\"\n",
+			wantDrop: "reported 1 result(s)",
+			wantSev:  SeverityError,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newScannerProject(t, script, tt.keys, other)
+
+			// Act
+			findings := p.run(Options{})
+
+			// Assert
+			var files []string
+			for _, f := range ofCode(findings, CodeExternalFinding) {
+				files = append(files, f.File)
+			}
+			require.Len(t, files, len(tt.wantFiles), dump(findings))
+			for i, want := range tt.wantFiles {
+				assert.True(t, strings.HasSuffix(files[i], want), "%s does not end in %s", files[i], want)
+			}
+			dropped := ofCode(findings, CodeScannerOutOfScope)
+			if tt.wantDrop == "" {
+				assert.Empty(t, dropped, dump(findings))
+				return
+			}
+			require.Len(t, dropped, 1, dump(findings))
+			assert.Contains(t, dropped[0].Message, tt.wantDrop)
+			assert.Equal(t, tt.wantSev, dropped[0].Severity)
+		})
+	}
+}
+
+func TestPartiallyDroppedResultsStayAWarning(t *testing.T) {
+	// Arrange: one staged file and one that is not.
+	script := `printf '{"version":"2.1.0","runs":[{"results":[` +
+		`{"ruleId":"A","message":{"text":"rule file"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":".ai-rulez/rules/r.md"}}}]},` +
+		`{"ruleId":"D","message":{"text":"ok"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":".ai-rulez/skills/deploy/SKILL.md"},"region":{"startLine":1}}}]}]}]}'` + "\n"
+	p := newScannerProject(t, script, "egress = false\ninputs = [\"skills\"]\n", nil)
+
+	// Act
+	dropped := ofCode(p.run(Options{}), CodeScannerOutOfScope)
+
+	// Assert
+	require.Len(t, dropped, 1)
+	assert.Equal(t, SeverityWarning, dropped[0].Severity)
+}
+
+func TestProjectPlaceholderNamesTheProjectRoot(t *testing.T) {
+	// Arrange: the scanner reports whether {project} is the project root (main.go is not staged) and where its cwd is.
+	script := `HAS=no; [ -f "$1/main.go" ] && HAS=yes
+printf '{"version":"2.1.0","runs":[{"results":[{"ruleId":"P","level":"warning","message":{"text":"project=%s"}}]}]}' "$HAS"` + "\n"
+	tests := []struct {
+		name string
+		keys string
+	}{
+		{"whole stage", "egress = false\ninputs = [\"skills\"]\nargs = \"{project}\"\n"},
+		{"per skill batches", "egress = false\ninputs = [\"skills\"]\nargs = \"{project}\", \"{skill_dirs}\"\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newScannerProject(t, script, tt.keys, nil)
+
+			// Act
+			findings := p.run(Options{})
+
+			// Assert
+			problems := ofCode(findings, CodeScannerConfigInvalid)
+			require.Empty(t, problems, dump(findings))
+			got := ofCode(findings, CodeExternalFinding)
+			require.Len(t, got, 1, dump(findings))
+			assert.Contains(t, got[0].Message, "project=yes")
+		})
+	}
+}
+
+func TestAllDroppedEscalationKeepsAnExplicitSeverity(t *testing.T) {
+	// Arrange: every result is out of scope, so AR9E6 would escalate to an error.
+	script := `printf '{"version":"2.1.0","runs":[{"results":[` +
+		`{"ruleId":"A","message":{"text":"rule file"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":".ai-rulez/rules/r.md"}}}]}]}]}'` + "\n"
+	tests := []struct {
+		name string
+		pre  string
+		want []Severity
+	}{
+		{"default escalates to error", "", []Severity{SeverityError}},
+		{"explicit info stays info", "\n[lint.severity]\nAR9E6 = \"info\"\n", []Severity{SeverityInfo}},
+		{"explicit warning stays warning", "\n[lint.severity]\nAR9E6 = \"warning\"\n", []Severity{SeverityWarning}},
+		{"off disables it", "\n[lint.severity]\nAR9E6 = \"off\"\n", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newScannerProject(t, script, "egress = false\ninputs = [\"skills\"]\n", map[string]string{"config.pre": tt.pre})
+
+			// Act
+			dropped := ofCode(p.run(Options{}), CodeScannerOutOfScope)
+
+			// Assert
+			var got []Severity
+			for _, f := range dropped {
+				got = append(got, f.Severity)
+			}
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }

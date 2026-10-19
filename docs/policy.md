@@ -247,6 +247,7 @@ issuer   = "https://token.actions.githubusercontent.com"
 [mcp]
 allowed_commands = ["npx", "uvx"]                               # the only commands a stdio MCP server may run
 deny_transports  = ["http", "sse"]                              # no remote MCP endpoint
+read_only        = true                                         # `ai-rulez mcp` registers only its read-only tools
 
 [hooks]
 allow = false                                                   # any [[hooks]] group is a violation
@@ -270,8 +271,12 @@ A pattern is a host, optionally followed by a path prefix, compared case-insensi
 
 Matching is by path prefix, so a trailing `/**` means the same as leaving it out. A bare `*` host is refused. A source
 is read from its URL: `https://github.com/example-org/rules.git`, `git@github.com:example-org/rules.git` and
-`ssh://git@host:2222/org/repo` all give a host and a path. A local path names no host and is not governed by
-`sources`.
+`ssh://git@host:2222/org/repo` all give a host and a path. The host is the one git connects to: a user, a port, a
+trailing dot and letter case are ignored, and an IPv6 literal is written `[::1]` in a pattern and a source. A source
+whose location cannot be read unambiguously (a backslash, whitespace, a malformed authority) is refused as not allowed
+rather than guessed, so `https://evil.example?@github.com/org/repo` is read as `evil.example`. Installed skill,
+marketplace and plugin sources are also rejected at validation when the authority carries `?`, `#`, a backslash,
+whitespace or, for web and `git://` URLs, a user. A local path names no host and is not governed by `sources`.
 
 `lint.security.allowed_hosts` lists hosts only (no path), because it bounds the hosts URLs inside content may point
 to.
@@ -321,6 +326,7 @@ Each key has one direction. The policy value is **enforced** (clamped) and any a
 | `signing.thresholds` | per subject, the larger value; a subject the repository leaves unset takes the floor | a lower explicit `[signing.thresholds]` value | `AR740` |
 | `mcp.allowed_commands` | the stdio servers whose command the list names (compared as written); an empty list allows none | an MCP server running another command; the server is not loaded. An imported agent, skill or command with such an inline `mcpServers` entry loses the whole `mcpServers` key | `AR748` |
 | `mcp.deny_transports` | union of layers | an MCP server on a denied transport (`stdio`, `http`, `sse`); the server is not loaded (inline `mcpServers` of imported content: as above) | `AR748` |
+| `mcp.read_only` | `true` (any layer; layers union) | `[mcp] read_only = false`; the server is read-only anyway, and `--read-only=false` cannot turn it off | `AR740` |
 | `hooks.allow` | `false` forbids every hook group | a `[[hooks]]` group; it is not loaded. An imported agent, skill or command that declares `hooks` in its frontmatter loses the key | `AR748` |
 | `governance.approvers` | the repository's entries that the list names; the policy list when it sets none or none is left. An empty policy list means nobody may approve | an entry the list does not name; the entry is dropped | `AR740` |
 
@@ -394,10 +400,10 @@ to LF. Exit code 2 when the repository loosens the policy (the same code `genera
 - The MCP servers: `mcp --serve-skills` fails to start on a configuration that loosens the policy, and the
   `generate_outputs` and `validate_config` tools of `mcp` refuse it (`validate_config` answers `valid: false`).
 - No suppression hides a protected code: for every code in `required_codes` or raised by `severity_floor` (and
-  AR740-AR745 themselves), `ai-rulez-lint-ignore` comments, `[lint] ignore_paths`, baseline entries and
+  AR740-AR745 themselves), `ai-rulez-lint-ignore` comments, `[lint] ignore_paths`, `[[lint.ignore_rules]]`, baseline entries and
   `[lint.ratchet]` budgets are not applied. The finding stays at its enforced severity and counts toward the exit
-  code, and one AR740 finding per route names the attempt (`[lint] ignore_paths`, `ai-rulez-lint-ignore comment`,
-  `baseline`, `[lint.ratchet]`) and the codes it tried to hide.
+  code, and one AR740 finding per route names the attempt (`[lint] ignore_paths`, `[[lint.ignore_rules]]`,
+  `ai-rulez-lint-ignore comment`, `baseline`, `[lint.ratchet]`) and the codes it tried to hide.
 - Remote sources a policy refuses are dropped before anything is fetched.
 
 ## Design decisions

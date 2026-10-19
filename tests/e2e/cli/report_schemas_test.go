@@ -28,7 +28,11 @@ func validateAgainstSchema(t *testing.T, schemaFile, stdout string) {
 	assert.True(t, res.IsValid(), "%s: %v\n%s", schemaFile, res.Errors, stdout)
 	doc, ok := v.(map[string]any)
 	require.True(t, ok, "a report is a JSON object: %s", stdout)
-	assert.EqualValues(t, 1, doc["schema_version"], "every report carries schema_version: %s", stdout)
+	want := 1
+	if schemaFile == "judge-report.schema.json" {
+		want = 2 // judge's report was redesigned (units, evidence, coverage); its schema_version is its own
+	}
+	assert.EqualValues(t, want, doc["schema_version"], "every report carries schema_version: %s", stdout)
 }
 
 const reportProjectConfig = `
@@ -129,6 +133,8 @@ func TestEveryJSONContractValidatesAgainstItsSchema(t *testing.T) {
 		{"eval run", []string{"eval", "run", "--dry-run"}, 0},
 		{"judge", []string{"judge", "--estimate", "--model", "openai/gpt-4o-mini"}, 0},
 		{"verify --approvals", []string{"verify", "--approvals"}, 0},
+		{"cache status", []string{"cache", "status"}, 0},
+		{"cache clear", []string{"cache", "clear"}, 0},
 		{"sbom", []string{"sbom", "--output", filepath.Join(t.TempDir(), "sbom.json")}, 0},
 	})
 

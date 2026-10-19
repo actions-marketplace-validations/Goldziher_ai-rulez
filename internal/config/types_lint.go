@@ -1,5 +1,18 @@
 package config
 
+// LintIgnoreRule is one rule-scoped ignore: findings of Rules in files matching
+// Paths are dropped, every other finding in those files is kept.
+type LintIgnoreRule struct {
+	// Rules lists finding codes (AR901) or names (claude-md-shadow); a pattern
+	// with a wildcard ("AR9*") matches codes.
+	Rules []string `yaml:"rules" json:"rules" toml:"rules"`
+	// Paths lists globs, relative to the config directory or the repository
+	// root, of the source files the ignore applies to.
+	Paths []string `yaml:"paths" json:"paths" toml:"paths"`
+	// Reason says why the findings are acceptable; it is for the reader.
+	Reason string `yaml:"reason,omitempty" json:"reason,omitempty" toml:"reason,omitempty"`
+}
+
 // LintConfig configures `ai-rulez validate`. Every field is optional;
 // the lint package applies defaults for anything left unset.
 type LintConfig struct {
@@ -19,6 +32,15 @@ type LintConfig struct {
 	// IgnorePaths lists globs, relative to the config directory, of source
 	// files whose findings are dropped.
 	IgnorePaths []string `yaml:"ignore_paths,omitempty" json:"ignore_paths,omitempty" toml:"ignore_paths,omitempty"` //nolint:tagliatelle
+	// IgnoreRules drops findings of the listed rules in the listed files only:
+	// `[[lint.ignore_rules]] rules = ["AR901", "AR9*"] paths = ["playground/**"]`.
+	IgnoreRules []LintIgnoreRule `yaml:"ignore_rules,omitempty" json:"ignore_rules,omitempty" toml:"ignore_rules,omitempty"` //nolint:tagliatelle
+	// SkillRoots lists globs, relative to the project root, of the directories
+	// that hold skill directories (".claude/skills", "plugins/*/skills") a
+	// harness loads from. AR808 checks a hand-written skill or command only in
+	// these directories; unset, the harness's own roots, a plugin's skills/ and
+	// local skill sources are used. Authored content is always checked.
+	SkillRoots []string `yaml:"skill_roots,omitempty" json:"skill_roots,omitempty" toml:"skill_roots,omitempty"` //nolint:tagliatelle
 	// Severity overrides the severity of a code or name: error, warning, info, off.
 	Severity map[string]string `yaml:"severity,omitempty" json:"severity,omitempty" toml:"severity,omitempty"`
 	// ExamplePaths lists globs, relative to the config directory or the repo
@@ -58,7 +80,8 @@ type LintConfig struct {
 	RequireMetadata map[string][]string `yaml:"require_metadata,omitempty" json:"require_metadata,omitempty" toml:"require_metadata,omitempty"` //nolint:tagliatelle
 	// AllowOverrides lists content names ("name") or domain-qualified names
 	// ("domain/name") whose shadowing of another copy is intentional, so they
-	// are not reported as collapsed duplicates.
+	// are not reported as collapsed duplicates. "name" or "preset:name" also
+	// acknowledges a skill or command named like a harness built-in (AR808).
 	AllowOverrides []string `yaml:"allow_overrides,omitempty" json:"allow_overrides,omitempty" toml:"allow_overrides,omitempty"` //nolint:tagliatelle
 	// AllowedKeys lists frontmatter keys accepted in addition to the built-in
 	// Agent Skills, Claude Code and ai-rulez keys.
@@ -79,6 +102,8 @@ type LintConfig struct {
 	Evals *LintEvals `yaml:"evals,omitempty" json:"evals,omitempty" toml:"evals,omitempty"`
 	// Traps configures the harness trap checks (AR9C1...).
 	Traps *LintTraps `yaml:"traps,omitempty" json:"traps,omitempty" toml:"traps,omitempty"`
+	// BuiltinNames configures the harness built-in name checks (AR9U0, AR9U1).
+	BuiltinNames *LintBuiltinNames `yaml:"builtin_names,omitempty" json:"builtin_names,omitempty" toml:"builtin_names,omitempty"` //nolint:tagliatelle
 	// AgentsMDOnly turns on the CLAUDE.md shadow check (AR9Q0): when AGENTS.md
 	// is canonical for Claude Code, every tracked CLAUDE.md, .claude/CLAUDE.md
 	// and CLAUDE.local.md that is not the generated "@AGENTS.md" shim is
@@ -96,6 +121,25 @@ type LintConfig struct {
 	// with the analyzers that judge what a model reads: security, references and
 	// descriptions. The same as `validate --outputs`.
 	LintOutputs bool `yaml:"lint_outputs,omitempty" json:"lint_outputs,omitempty" toml:"lint_outputs,omitempty"` //nolint:tagliatelle
+}
+
+// LintBuiltinNames configures the checks for a skill, command or agent that is named like a
+// built-in of a harness that loads it (AR9U0) or like a name the harness refuses to load (AR9U1).
+type LintBuiltinNames struct {
+	// Enabled turns the checks off when false; unset or true runs them.
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty" toml:"enabled,omitempty"`
+	// Allow lists collisions that are intended: "name" (any harness) or "preset:name".
+	// It does not silence AR9U1, which the harness enforces. lint.allow_overrides is
+	// honored the same way.
+	Allow []string `yaml:"allow,omitempty" json:"allow,omitempty" toml:"allow,omitempty"`
+	// Extra maps a preset to built-in names the embedded table cannot know: commands of
+	// the organization, MCP prompts, plugin skills, user-level skills.
+	Extra map[string][]string `yaml:"extra,omitempty" json:"extra,omitempty" toml:"extra,omitempty"`
+}
+
+// BuiltinNamesEnabled reports whether the checks run. Safe on a nil receiver.
+func (b *LintBuiltinNames) BuiltinNamesEnabled() bool {
+	return b == nil || b.Enabled == nil || *b.Enabled
 }
 
 // LintTraps configures the checks for files a harness silently ignores.
@@ -164,7 +208,10 @@ type LintSecretPattern struct {
 
 // LintExternal is an external scanner. Command is an argv, run from the
 // project root with the paths of the scanned files appended; it must print
-// SARIF 2.1.0 or the ai-rulez JSON list to stdout. It never runs through a
+// SARIF 2.1.0 or the ai-rulez JSON list to stdout. A relative command[0] is
+// resolved against the project root, but with inputs the scanner's working
+// directory is the stage, so a relative script argument is not: write it as
+// {project}/tools/scan.py. It never runs through a
 // shell, and every run is bounded by a timeout, an output cap and a process
 // group kill.
 type LintExternal struct {
@@ -178,7 +225,9 @@ type LintExternal struct {
 	// false scrubs the environment and rejects known egress flags; true runs the
 	// scanner only when its name is passed to --allow-egress.
 	Egress *bool `yaml:"egress,omitempty" json:"egress,omitempty" toml:"egress,omitempty"`
-	// Timeout is a Go duration such as "90s"; default 2m, at most 15m.
+	// Timeout is a Go duration such as "90s"; default 2m, at most 15m (or
+	// [lint.scanner_policy] max_timeout). It bounds each run of the command: each
+	// batch of a batch_size scanner gets the whole timeout.
 	Timeout string `yaml:"timeout,omitempty" json:"timeout,omitempty" toml:"timeout,omitempty"`
 	// EnvPass lists extra environment variable names passed through the scrubbed
 	// environment. Proxy and credential-like names are rejected when egress is false.
@@ -186,7 +235,7 @@ type LintExternal struct {
 	// Inputs turns staging on: the scanner runs in a scratch directory that holds
 	// a read-only copy of exactly these kinds of content (rules, context, skills,
 	// agents, commands, checks, hooks, mcp, imports) and nothing else. The
-	// placeholders {stage}, {root}, {files}, {skill_dirs}, {out} and {tmp} in
+	// placeholders {stage}, {root}, {project}, {files}, {skill_dirs}, {out} and {tmp} in
 	// command are expanded as argv elements; no file path is appended.
 	Inputs []string `yaml:"inputs,omitempty" json:"inputs,omitempty" toml:"inputs,omitempty"`
 	// SeverityMap maps a scanner rule id (glob) to a severity: critical, high,
@@ -202,6 +251,44 @@ type LintExternal struct {
 	// Version is a semantic version range the scanner's --version output must
 	// satisfy (">=1.0.0, <2"); a scanner outside it is not run (AR9E2).
 	Version string `yaml:"version,omitempty" json:"version,omitempty" toml:"version,omitempty"`
+	// VersionCommand is the argv that prints the scanner's version for the
+	// Version check. Default: command[0] --version, which names the launcher
+	// (python3, node, uvx) rather than the scanner when command[0] is one. It runs
+	// from the project root, in the scanner's isolation mode; needs Version.
+	VersionCommand []string `yaml:"version_command,omitempty" json:"version_command,omitempty" toml:"version_command,omitempty"` //nolint:tagliatelle
+	// VersionTimeout bounds the version probe (a duration such as "30s"; default
+	// 10s). A probe that exceeds it is reported as timed out (AR9E2); needs Version.
+	VersionTimeout string `yaml:"version_timeout,omitempty" json:"version_timeout,omitempty" toml:"version_timeout,omitempty"` //nolint:tagliatelle
+	// BatchSize splits the skill directories handed to a command that passes
+	// {skill_dirs} into runs of at most this many directories, each with its own
+	// timeout and cached on its own. 0 (default) hands the scanner all of them
+	// at once, subject to the command-line size limit.
+	BatchSize int `yaml:"batch_size,omitempty" json:"batch_size,omitempty" toml:"batch_size,omitempty"` //nolint:tagliatelle
+	// Parallel runs up to this many batches at the same time (1 to 16; default 1).
+	// Each batch gets its own {out} file and temp directory.
+	Parallel int `yaml:"parallel,omitempty" json:"parallel,omitempty" toml:"parallel,omitempty"`
+	// StageGlobs narrows the files of a staged skill directory to the ones
+	// matching a glob (relative to the skill directory; a pattern with no slash
+	// matches at any depth, ** crosses directories). SKILL.md is always staged.
+	// Unset stages every regular file of the directory.
+	StageGlobs []string `yaml:"stage_globs,omitempty" json:"stage_globs,omitempty" toml:"stage_globs,omitempty"` //nolint:tagliatelle
+	// StageExclude leaves out the files of a staged skill directory that match a
+	// glob (same syntax as StageGlobs); it wins over StageGlobs. SKILL.md is
+	// always staged.
+	StageExclude []string `yaml:"stage_exclude,omitempty" json:"stage_exclude,omitempty" toml:"stage_exclude,omitempty"` //nolint:tagliatelle
+	// CacheFiles lists globs, relative to the project root, of files the scanner
+	// reads besides the staged content (a rules file, a config). Their content is
+	// part of the result cache key. The script a command runs through an
+	// interpreter (python3 scan.py) is hashed without being listed.
+	CacheFiles []string `yaml:"cache_files,omitempty" json:"cache_files,omitempty" toml:"cache_files,omitempty"` //nolint:tagliatelle
+	// FailOn is the lowest severity of this scanner's findings that fails the run
+	// ("error", "warning" or "info"). It replaces [lint.scanner_policy] fail_on for
+	// this scanner, and the run's own threshold (--strict, --fail-on) for its findings.
+	FailOn string `yaml:"fail_on,omitempty" json:"fail_on,omitempty" toml:"fail_on,omitempty"` //nolint:tagliatelle
+	// MaxMessage is the number of characters of a finding message kept in text
+	// output (default 500, at most 100000). The full text stays in the JSON
+	// report and SARIF output. It wins over [lint.scanner_policy] max_message.
+	MaxMessage int `yaml:"max_message,omitempty" json:"max_message,omitempty" toml:"max_message,omitempty"` //nolint:tagliatelle
 	// Required makes a missing, outdated or failing scanner an error instead of a notice.
 	Required bool `yaml:"required,omitempty" json:"required,omitempty" toml:"required,omitempty"`
 }
@@ -215,8 +302,17 @@ type LintScannerPolicy struct {
 	// Required lists scanner names whose absence or failure is an error.
 	Required []string `yaml:"required,omitempty" json:"required,omitempty" toml:"required,omitempty"`
 	// FailOn is the lowest severity of a scanner finding that makes the run fail:
-	// "error", "warning" or "info". It applies to scanner findings only.
+	// "error", "warning" or "info". It applies to scanner findings only, and replaces the run's own
+	// threshold (--strict, --fail-on) for them; a scanner entry's fail_on wins.
 	FailOn string `yaml:"fail_on,omitempty" json:"fail_on,omitempty" toml:"fail_on,omitempty"` //nolint:tagliatelle
+	// MaxMessage is the default number of characters of a scanner finding message
+	// kept in text output (default 500, at most 100000); a scanner's own
+	// max_message wins. The JSON report and SARIF output keep the full text.
+	MaxMessage int `yaml:"max_message,omitempty" json:"max_message,omitempty" toml:"max_message,omitempty"` //nolint:tagliatelle
+	// MaxTimeout is the longest timeout one run of a scanner may be given, a Go
+	// duration up to 6h (default 15m). Per-scanner timeout values above it are
+	// refused. Only the policy can raise it: an entry cannot lift its own bound.
+	MaxTimeout string `yaml:"max_timeout,omitempty" json:"max_timeout,omitempty" toml:"max_timeout,omitempty"` //nolint:tagliatelle
 	// Baseline is the scanner baseline file, relative to the project root
 	// (default: scanner-baseline.json in the configuration directory).
 	Baseline string `yaml:"baseline,omitempty" json:"baseline,omitempty" toml:"baseline,omitempty"`

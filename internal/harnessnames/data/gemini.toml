@@ -1,0 +1,124 @@
+schema = 1
+preset = "gemini"
+harness_version = "v0.64.0"
+verified_on = "2026-10-18"
+completeness = "complete"
+severity = "error"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://github.com/google-gemini/gemini-cli/blob/v0.64.0/packages/cli/src/services/BuiltinCommandLoader.ts"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s2"
+url = "https://github.com/google-gemini/gemini-cli/tree/v0.64.0/packages/core/src/skills/builtin"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s3"
+url = "https://github.com/google-gemini/gemini-cli/blob/v0.64.0/packages/core/src/agents/registry.ts"
+quote = "The later definition will be ignored."
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s4"
+url = "https://github.com/google-gemini/gemini-cli/blob/v0.64.0/packages/cli/src/services/SlashCommandResolver.ts"
+quote = "Built-in commands always keep the original name."
+verified_on = "2026-10-17"
+
+[[source]]
+id = "s5"
+url = "https://github.com/google-gemini/gemini-cli/blob/v0.64.0/packages/core/src/skills/skillManager.ts"
+quote = "1. Built-in skills (lowest precedence)"
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+evidence = "s4"
+user_collision = "builtin_wins"
+match = "exact"
+names = [
+  "about",
+  "agents",
+  "auth",
+  "bug",
+  "bug-memory",
+  "chat",
+  "clear",
+  "commands",
+  "compress",
+  "copy",
+  "corgi",
+  "directory",
+  "docs",
+  "editor",
+  "export-session",
+  "extensions",
+  "footer",
+  "gemma",
+  "help",
+  "hooks",
+  "ide",
+  "init",
+  "mcp",
+  "memory",
+  "model",
+  "oncall",
+  "permissions",
+  "plan",
+  "policies",
+  "privacy",
+  "profile",
+  "quit",
+  "restore",
+  "resume",
+  "rewind",
+  "settings",
+  "setup-github",
+  "shortcuts",
+  "skills",
+  "stats",
+  "tasks",
+  "terminal-setup",
+  "theme",
+  "tools",
+  "upgrade",
+  "vim",
+  "voice",
+]
+aliases = { "clear" = [
+  "new",
+], "compress" = [
+  "compact",
+  "summarize",
+], "directory" = [
+  "dir",
+], "footer" = [
+  "statusline",
+], "quit" = [
+  "exit",
+], "stats" = [
+  "usage",
+], "tasks" = [
+  "background",
+  "bg",
+] }
+
+[[group]]
+kind = "skill"
+source = "s2"
+evidence = "s5"
+user_collision = "user_wins"
+match = "exact"
+names = ["antigravity-support", "skill-creator"]
+
+[[group]]
+kind = "agent"
+source = "s3"
+user_collision = "builtin_wins"
+match = "exact"
+names = ["browser_agent", "cli_help", "codebase_investigator", "generalist"]

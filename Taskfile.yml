@@ -103,8 +103,11 @@ tasks:
 
   test:
     desc: "Run unit and integration tests"
+    vars:
+      TEST_TIMEOUT: '{{default "30m" .TEST_TIMEOUT}}'
+      COMMAND_TEST_LOG_DIR: '{{default "" .COMMAND_TEST_LOG_DIR}}'
     cmds:
-      - go test -timeout 30m ./cmd/... ./internal/... ./schema/... ./tests/fixtures/... ./tests/integration/... ./tests/testutil/... ./tests/archlint/...
+      - '{{if eq OS "windows"}}go run ./scripts/testshard -shards 4 -log-dir "{{.COMMAND_TEST_LOG_DIR}}"{{else}}go test{{end}} -timeout {{.TEST_TIMEOUT}} ./cmd/... ./internal/... ./pkg/... ./scripts/... ./bench/... ./schema/... ./tests/fixtures/... ./tests/integration/... ./tests/testutil/... ./tests/archlint/...'
 
   schema:local:generate:
     desc: "Derive the local overlay schema from the main schema"
@@ -190,10 +193,25 @@ tasks:
     cmds:
       - scripts/bats/lint.sh
 
+  bench:judge:
+    desc: "Run the judge benchmark on Amazon Bedrock: the synthetic corpus of bench/judge through the model pipeline, then precision/recall per code, the trap false-positive rate, grounding and cost. Spends money (hard cap 5 USD by default); pass flags after --, for example: task bench:judge -- --max-cost 3 --only mal-s03-a,trap-t01. Uses AWS_PROFILE=default and AWS_REGION=eu-north-1 unless --aws-profile / --aws-region say otherwise"
+    cmds:
+      - go run ./bench/judge/cmd/judgebench {{.CLI_ARGS}}
+
+  bench:judge:offline:
+    desc: "Run the offline half of the judge benchmark: the verifier and the convention attachment on the corpus, no model"
+    cmds:
+      - go test ./bench/judge/... -count=1
+
   test:benchmark:
     desc: "Run Go benchmarks (small and medium synthetic projects)"
     cmds:
       - go test -bench=. -run='^$' -timeout 30m ./...
+
+  test:benchmark:smoke:
+    desc: "Run every benchmark once (-benchtime=1x): proves they still run, measures nothing. CI runs this; the regression gate is test:benchmark:regression"
+    cmds:
+      - go test -bench=. -benchtime=1x -run='^$' -timeout 15m ./...
 
   test:benchmark:large:
     desc: "Run Go benchmarks including the 2000-file synthetic project (one iteration each)"
@@ -203,12 +221,17 @@ tasks:
       - go test -bench=. -benchtime=1x -run='^$' -timeout 60m ./...
 
   test:benchmark:regression:
-    desc: "Run the curated benchmark subset and fail on a >25% time/op regression against scripts/bench-baseline.txt"
+    desc: "Build and run the curated benchmark subset at the merge base and at HEAD on this machine, interleaved, and fail on a >20% time/op regression that is statistically significant (what CI runs). Pass a ref after --: task test:benchmark:regression -- origin/main"
+    cmds:
+      - scripts/bench.sh --compare {{.CLI_ARGS}}
+
+  test:benchmark:baseline:check:
+    desc: "Fallback: compare HEAD with the committed scripts/bench-baseline.txt (only meaningful on the CPU model that recorded it)"
     cmds:
       - scripts/bench.sh
 
   test:benchmark:baseline:
-    desc: "Re-record scripts/bench-baseline.txt on this machine"
+    desc: "Re-record the fallback scripts/bench-baseline.txt on this machine"
     cmds:
       - scripts/bench.sh --update
 
@@ -267,9 +290,26 @@ tasks:
       - go run ./scripts/docsllms --check
 
   harness:verify:
-    desc: "List harness trap and limit rows with source and verified_on; fail when older than max_table_age_days (default 90). HARNESS_MAX_AGE_DAYS overrides; HARNESS_VERIFY_FETCH=1 also re-fetches each quote (network)"
+    desc: "List harness trap, limit and built-in name table rows with source and verified_on; fail when older than max_table_age_days (default 90). HARNESS_MAX_AGE_DAYS overrides; HARNESS_VERIFY_FETCH=1 also re-fetches each quote (network)"
     cmds:
       - HARNESS_VERIFY=1 go test ./internal/lint -run TestHarnessVerify -count=1 -v
+
+  harness:builtins:test:
+    desc: "Run the offline unit tests of tools/harness-builtins (extractor parsers against saved fixtures; needs python3)"
+    dir: tools/harness-builtins
+    cmds:
+      - python3 -I -m unittest discover -s tests -t .
+
+  harness:builtins:check:
+    desc: "Network: fail when a data file differs from what its pinned registry yields (generate.py --check) or a quote is missing from its page (check_sources.py)"
+    cmds:
+      - python3 -I tools/harness-builtins/generate.py --check
+      - python3 -I tools/harness-builtins/check_sources.py
+
+  harness:builtins:refresh:
+    desc: "Network, writes nothing: show the names that would change if each pin moved to its latest tag or head (generate.py --bump). Apply one with: python3 -I tools/harness-builtins/generate.py --bump --apply <preset>"
+    cmds:
+      - python3 -I tools/harness-builtins/generate.py --bump
 
   demo:record:
     desc: "Re-record the README terminal demos with vhs (all, or name them: task demo:record -- validate); uses the ai-rulez on PATH"

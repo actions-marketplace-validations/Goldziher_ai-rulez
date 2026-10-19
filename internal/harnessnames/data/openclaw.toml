@@ -1,0 +1,179 @@
+schema = 1
+preset = "openclaw"
+harness_version = "v2026.10.4"
+verified_on = "2026-10-18"
+completeness = "partial"
+severity = "warning"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://github.com/openclaw/openclaw/blob/v2026.10.4/docs/tools/slash-commands.md"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s2"
+url = "https://github.com/openclaw/openclaw/tree/v2026.10.4/skills"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s3"
+url = "https://github.com/openclaw/openclaw/blob/v2026.10.4/docs/tools/slash-commands.md"
+quote = "`/dashboard` is reserved as a built-in command."
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s4"
+url = "https://github.com/openclaw/openclaw/blob/v2026.10.4/docs/tools/skills.md"
+quote = "When the same skill name appears in multiple places, the highest source wins."
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+user_collision = "unknown"
+match = "exact"
+names = [
+  "acp",
+  "activation",
+  "agents",
+  "allowlist",
+  "approve",
+  "bash",
+  "btw",
+  "codex",
+  "commands",
+  "compact",
+  "config",
+  "context",
+  "debug",
+  "diagnostics",
+  "dreaming",
+  "elevated",
+  "exec",
+  "export-session",
+  "export-trajectory",
+  "fast",
+  "goal",
+  "help",
+  "learn",
+  "login",
+  "loop",
+  "mcp",
+  "model",
+  "models",
+  "name",
+  "new",
+  "openclaw",
+  "pair",
+  "plugins",
+  "queue",
+  "reasoning",
+  "reset",
+  "restart",
+  "send",
+  "session",
+  "skill",
+  "status",
+  "steer",
+  "stop",
+  "subagents",
+  "think",
+  "tools",
+  "trace",
+  "tts",
+  "update",
+  "usage",
+  "verbose",
+  "voice",
+  "whoami",
+]
+aliases = { "btw" = [
+  "side",
+], "elevated" = [
+  "elev",
+], "export-session" = [
+  "export",
+], "export-trajectory" = [
+  "trajectory",
+], "plugins" = [
+  "plugin",
+], "reasoning" = [
+  "reason",
+], "steer" = [
+  "tell",
+], "think" = [
+  "t",
+  "thinking",
+], "verbose" = [
+  "v",
+], "whoami" = [
+  "id",
+] }
+
+[[group]]
+kind = "command"
+source = "s1"
+evidence = "s3"
+user_collision = "builtin_wins"
+match = "exact"
+names = ["dashboard"]
+
+[[group]]
+kind = "skill"
+source = "s2"
+evidence = "s4"
+user_collision = "user_wins"
+match = "exact"
+names = [
+  "1password",
+  "apple-notes",
+  "apple-reminders",
+  "bear-notes",
+  "blogwatcher",
+  "blucli",
+  "camsnap",
+  "clawhub",
+  "coding-agent",
+  "control-ui",
+  "diagram-maker",
+  "eightctl",
+  "gemini",
+  "gh-issues",
+  "gifgrep",
+  "github",
+  "gog",
+  "goplaces",
+  "healthcheck",
+  "himalaya",
+  "mcporter",
+  "meme-maker",
+  "model-usage",
+  "nano-pdf",
+  "node-connect",
+  "node-inspect-debugger",
+  "notion",
+  "obsidian",
+  "openai-whisper",
+  "openai-whisper-api",
+  "openhue",
+  "oracle",
+  "ordercli",
+  "peekaboo",
+  "python-debugpy",
+  "sag",
+  "sherpa-onnx-tts",
+  "skill-creator",
+  "songsee",
+  "sonoscli",
+  "spike",
+  "spotify-player",
+  "summarize",
+  "things-mac",
+  "tmux",
+  "trello",
+  "visualize",
+  "weather",
+  "xurl",
+]

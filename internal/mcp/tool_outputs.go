@@ -23,6 +23,9 @@ type mutationOut struct {
 	Domains []string `json:"domains,omitempty" jsonschema:"Domains of a profile"`
 	Updated []string `json:"updated,omitempty" jsonschema:"Settings that update_config changed"`
 	Message string   `json:"message,omitempty" jsonschema:"Human-readable summary"`
+	Scope   string   `json:"scope,omitempty" jsonschema:"Scope a scoped skill write went to"`
+	Harness string   `json:"harness,omitempty" jsonschema:"Preset whose skills directory a scoped skill write used"`
+	Lock    string   `json:"lock,omitempty" jsonschema:"Present when ai-rulez.lock exists: a scoped write is reported as drift until the lock is refreshed"`
 }
 
 // readOut is the result of a read tool.
@@ -114,6 +117,15 @@ type validateOut struct {
 	Findings []any          `json:"findings,omitempty" jsonschema:"Every finding with code, name, severity, file, line and message"`
 	Summary  map[string]any `json:"summary,omitempty" jsonschema:"Finding counts by severity and by code"`
 	Risk     map[string]any `json:"risk,omitempty" jsonschema:"Advisory risk score"`
+}
+
+// judgeOut is the result of judge: the document of `ai-rulez judge --format json`.
+type judgeOut struct {
+	SchemaVersion int              `json:"schema_version" jsonschema:"2"`
+	Mode          string           `json:"mode" jsonschema:"judge, or estimate when nothing was sent"`
+	Run           map[string]any   `json:"run" jsonschema:"Provenance of the run: models, egress hosts, gate, coverage, cost"`
+	Units         []map[string]any `json:"units" jsonschema:"One entry per unit with its status, scores, attached conventions, coverage and verified findings"`
+	Summary       map[string]any   `json:"summary" jsonschema:"The decision (pass, fail, incomplete), counts and grounding totals"`
 }
 
 // doctorOut is the result of doctor.

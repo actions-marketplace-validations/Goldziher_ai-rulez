@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -56,12 +57,13 @@ const (
 	phSkillDirs = "{skill_dirs}"
 	phOut       = "{out}"
 	phTmp       = "{tmp}"
+	phProject   = "{project}"
 )
 
 var (
 	stagePlaceholderRe = sync.OnceValue(func() *regexp.Regexp { return regexp.MustCompile(`\{[a-z_]+\}`) })
 	listHolders        = map[string]bool{phFiles: true, phSkillDirs: true}
-	allHolders         = map[string]bool{phStage: true, phRoot: true, phFiles: true, phSkillDirs: true, phOut: true, phTmp: true}
+	allHolders         = map[string]bool{phStage: true, phRoot: true, phFiles: true, phSkillDirs: true, phOut: true, phTmp: true, phProject: true}
 )
 
 // inputProblems lists what is wrong with an entry's inputs and its command's placeholders.
@@ -76,7 +78,7 @@ func inputProblems(ex config.LintExternal) []string {
 		for _, ph := range stagePlaceholderRe().FindAllString(arg, -1) {
 			switch {
 			case !allHolders[ph]:
-				problems = append(problems, fmt.Sprintf("command has the unknown placeholder %s (use %s)", ph, "{stage}, {root}, {files}, {skill_dirs}, {out} or {tmp}"))
+				problems = append(problems, fmt.Sprintf("command has the unknown placeholder %s (use %s)", ph, "{stage}, {root}, {project}, {files}, {skill_dirs}, {out} or {tmp}"))
 			case len(ex.Inputs) == 0:
 				problems = append(problems, fmt.Sprintf("command uses %s, which needs inputs (the staged content)", ph))
 			case listHolders[ph] && arg != ph:
@@ -100,6 +102,7 @@ func containsString(list []string, s string) bool {
 type scannerStage struct {
 	scratch string // the scratch directory that holds everything below
 	root    string // scratch/stage
+	project string // the project root, for {project}
 	// files are the absolute stage paths of every staged file, sorted.
 	files []string
 	// skillDirs are the absolute stage paths of the staged skill directories.
@@ -125,7 +128,7 @@ func (r *runner) buildStageFrom(files []stagedFile) (*scannerStage, error) {
 	if resolved, rerr := filepath.EvalSymlinks(base); rerr == nil {
 		base = resolved // a scanner prints paths it resolved; match them
 	}
-	st := &scannerStage{scratch: base, root: filepath.Join(base, "stage"), source: map[string]string{}}
+	st := &scannerStage{scratch: base, root: filepath.Join(base, "stage"), project: r.rootAbs(), source: map[string]string{}}
 	if err := st.write(files); err != nil {
 		st.cleanup()
 		return nil, err
@@ -133,8 +136,55 @@ func (r *runner) buildStageFrom(files []stagedFile) (*scannerStage, error) {
 	return st, nil
 }
 
+// stageFilesFor lists the files staged for sc: its inputs in its layout, with
+// the skill files its stage_globs and stage_exclude select.
+func (r *runner) stageFilesFor(sc resolvedScanner) []stagedFile {
+	want := map[string]bool{}
+	for _, in := range sc.Inputs {
+		want[in] = true
+	}
+	return r.stageFilesWith(want, sc.Layout, newStageFilter(sc.LintExternal))
+}
+
+// stageFilesToScan is stageFilesFor for a run that scans: under --changed or
+// --since a per-skill scanner is handed only the skills with a changed file, so
+// the supporting files of every other skill are not listed, read or filtered.
+// The skills that do hold a changed path (a superset of the changed ones) are
+// listed in full, and markUnchanged then decides exactly as for a full listing.
+func (r *runner) stageFilesToScan(sc resolvedScanner) []stagedFile {
+	want := map[string]bool{}
+	for _, in := range sc.Inputs {
+		want[in] = true
+	}
+	filter := newStageFilter(sc.LintExternal)
+	if changed := r.opts.Scanner.ChangedFiles; changed != nil && !r.opts.Scanner.WriteBaseline && perSkillCommand(sc.Command) {
+		dirs := changedDirs(changed)
+		filter.unchanged = func(it *item) bool {
+			rel := r.tree.Rel(it.itemDir)
+			return rel != "" && !dirs[rel]
+		}
+	}
+	return r.stageFilesWith(want, sc.Layout, filter)
+}
+
+// changedDirs is the set of directories (repository-relative slash paths) that
+// hold at least one of the changed files, at any depth.
+func changedDirs(changed []string) map[string]bool {
+	dirs := make(map[string]bool, len(changed)*3)
+	for _, c := range changed {
+		for d := path.Dir(filepath.ToSlash(c)); d != "." && d != "/" && !dirs[d]; d = path.Dir(d) {
+			dirs[d] = true
+		}
+	}
+	return dirs
+}
+
 // stageFiles lists the files for the wanted inputs, sorted by stage path.
 func (r *runner) stageFiles(want map[string]bool, layout string) []stagedFile {
+	return r.stageFilesWith(want, layout, stageFilter{})
+}
+
+func (r *runner) stageFilesWith(want map[string]bool, layout string, filter stageFilter) []stagedFile {
 	var out []stagedFile
 	used := map[string]bool{}
 	claim := func(rel string) string {
@@ -153,7 +203,7 @@ func (r *runner) stageFiles(want map[string]bool, layout string) []stagedFile {
 		if it.isDoc || (it.owned && !want[itemInputs[it.kind]]) || (!it.owned && !want[inputImports]) {
 			continue
 		}
-		out = append(out, r.stageItem(it, layout, cfgFile, claim)...)
+		out = append(out, r.stageItem(it, layout, cfgFile, filter, claim)...)
 	}
 	if want[inputHooks] && len(r.cfg.Hooks) > 0 {
 		if data, err := json.MarshalIndent(r.cfg.Hooks, "", "  "); err == nil {
@@ -172,12 +222,16 @@ func (r *runner) stageFiles(want map[string]bool, layout string) []stagedFile {
 // stageItem lists the files one content item stages: the item itself and, for a
 // skill laid out as a directory, its supporting files. It is empty for an item
 // the layout leaves out.
-func (r *runner) stageItem(it *item, layout, cfgFile string, claim func(string) string) []stagedFile {
+func (r *runner) stageItem(it *item, layout, cfgFile string, filter stageFilter, claim func(string) string) []stagedFile {
 	dir, rel := r.layoutPath(it, layout)
 	if rel == "" {
 		return nil
 	}
 	file := stagedFile{rel: claim(rel), data: []byte(it.cf.Content), source: it.abs}
+	if it.owned && dir != "" && filter.unchanged != nil && filter.unchanged(it) {
+		file.skillOf = path.Dir(file.rel)
+		return []stagedFile{file}
+	}
 	if it.owned {
 		// The loaded content has its frontmatter removed; the scanner must see the file
 		// as it is on disk, so reported line numbers match the real file.
@@ -191,10 +245,16 @@ func (r *runner) stageItem(it *item, layout, cfgFile string, claim func(string) 
 		return []stagedFile{file}
 	}
 	file.skillOf = path.Dir(file.rel)
-	out := []stagedFile{file}
-	for _, res := range it.cf.Resources {
+	return append([]stagedFile{file}, r.stageResources(it, file, cfgFile, filter, claim)...)
+}
+
+// stageResources lists the supporting files of the skill directory whose
+// SKILL.md is file.
+func (r *runner) stageResources(it *item, file stagedFile, cfgFile string, filter stageFilter, claim func(string) string) []stagedFile {
+	var out []stagedFile
+	for _, res := range r.stageSkillFiles(it) {
 		rr := path.Clean(strings.ReplaceAll(res.RelPath, `\`, "/"))
-		if rr == "." || path.IsAbs(rr) || rr == ".." || strings.HasPrefix(rr, "../") {
+		if rr == "." || path.IsAbs(rr) || rr == ".." || strings.HasPrefix(rr, "../") || !filter.keep(rr) {
 			continue
 		}
 		src := cfgFile
@@ -443,20 +503,43 @@ func restoreWrite(scratch string) {
 	})
 }
 
-// outFile is the path of the {out} file.
-func (st *scannerStage) outFile() string { return filepath.Join(st.scratch, "out.sarif") }
+// outName is the name of the {out} file of run idx below the scratch directory.
+// Runs of one stage that may overlap (batches) each get their own file and
+// temp directory; the first keeps the plain names.
+func outName(idx int) string {
+	if idx == 0 {
+		return "out.sarif"
+	}
+	return "out-" + strconv.Itoa(idx) + ".sarif"
+}
+
+func (st *scannerStage) outFileN(idx int) string { return filepath.Join(st.scratch, outName(idx)) }
+
+// tmpDirN is the scratch temp directory of run idx.
+func (st *scannerStage) tmpDirN(idx int) string {
+	if idx == 0 {
+		return filepath.Join(st.scratch, "tmp")
+	}
+	return filepath.Join(st.scratch, "tmp-"+strconv.Itoa(idx))
+}
 
 // expand turns a command template into argv. list placeholders become one
 // argument per path; the others are replaced inside the argument. No shell is involved.
 func (st *scannerStage) expand(cmd []string) []string {
-	repl := strings.NewReplacer(phStage, st.root, phRoot, st.root, phOut, st.outFile(), phTmp, filepath.Join(st.scratch, "tmp"))
+	return st.expandFor(cmd, st.skillDirs, 0)
+}
+
+// expandFor is expand for run idx, handing the scanner the skill directories
+// dirs (absolute stage paths) instead of all of them.
+func (st *scannerStage) expandFor(cmd, dirs []string, idx int) []string {
+	repl := strings.NewReplacer(phStage, st.root, phRoot, st.root, phOut, st.outFileN(idx), phTmp, st.tmpDirN(idx), phProject, st.project)
 	argv := make([]string, 0, len(cmd)+len(st.files))
 	for _, arg := range cmd {
 		switch arg {
 		case phFiles:
 			argv = append(argv, st.files...)
 		case phSkillDirs:
-			argv = append(argv, st.skillDirs...)
+			argv = append(argv, dirs...)
 		default:
 			argv = append(argv, repl.Replace(arg))
 		}
@@ -466,8 +549,11 @@ func (st *scannerStage) expand(cmd []string) []string {
 
 // env is the scrubbed environment of a staged run: the scratch home and temp
 // directories replace the real ones, so a scanner finds no config or cache of the user.
-func (st *scannerStage) env(pass, parent []string) []string {
-	home, tmp := filepath.Join(st.scratch, "home"), filepath.Join(st.scratch, "tmp")
+func (st *scannerStage) env(pass, parent []string) []string { return st.envFor(pass, parent, 0) }
+
+// envFor is env for run idx.
+func (st *scannerStage) envFor(pass, parent []string, idx int) []string {
+	home, tmp := filepath.Join(st.scratch, "home"), st.tmpDirN(idx)
 	extra := []string{"HOME=" + home, "TMPDIR=" + tmp}
 	if runtime.GOOS == osWindows {
 		extra = append(extra, "USERPROFILE="+home, "TMP="+tmp, "TEMP="+tmp)

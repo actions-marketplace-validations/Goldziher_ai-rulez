@@ -34,29 +34,19 @@ const (
 
 // keyDigest is the JSON key digests are reported under.
 const (
-	keyDigest     = "digest"
-	keyURI        = "uri"
-	keyName       = "name"
-	keySize       = "size"
-	keyResources  = "resources"
-	keyResultType = "resultType"
+	keyDigest      = "digest"
+	keyURI         = "uri"
+	keyName        = "name"
+	keySize        = "size"
+	keyResources   = "resources"
+	keyResultType  = "resultType"
+	keyDescription = "description"
+	keyCount       = "count"
+	keyResults     = "results"
+	keyKind        = "kind"
 	// domainRoot names the skills that belong to no domain.
 	domainRoot = "root"
 )
-
-const skillServerInstructions = "ai-rulez serves the skills of one profile read-only. " +
-	"Skills are MCP resources under skill://<name>/SKILL.md (supporting files sit beside it); " +
-	"skills/list and skills/get return each skill's frontmatter plus the SHA-256 digest and size of every file. " +
-	"Call find_skill with a task to get ranked matches and load_skill to read one (list_skill_resources shows its files); " +
-	"search_skills, get_skill and read_skill_file are the lexical equivalents. This server cannot modify any content."
-
-// mergedServerInstructions is surfaced when one server serves both surfaces
-// (`mcp --serve-skills`): the authoring tools, prompts and ai-rulez:// resources
-// of `mcp`, plus the skills extension and the skill:// resources.
-const mergedServerInstructions = serverInstructions + " " +
-	"This server also serves the project's skills read-only: skills are MCP resources under " +
-	"skill://<name>/SKILL.md; call find_skill with a task and load_skill to read one. " +
-	"Start it with --read-only to register the read-only tools only."
 
 // NewSkillServer builds the read-only serving surface: the Skills extension
 // (skills/list, skills/get, skill:// resources) plus search_skills, get_skill
@@ -90,18 +80,19 @@ func NewMergedServer(version string, catalog *Catalog, opts ServeOptions, author
 func newServingServer(version string, catalog *Catalog, opts ServeOptions, authoring []Option) *Server {
 	merged := authoring != nil
 	name, title := "ai-rulez-skills", "AI-Rulez Skills"
-	instructions := skillServerInstructions
 	caps := &sdkmcp.ServerCapabilities{
 		Tools:     &sdkmcp.ToolCapabilities{},
 		Resources: &sdkmcp.ResourceCapabilities{ListChanged: true},
 	}
 	if merged {
 		name, title = "ai-rulez", "AI-Rulez"
-		instructions = mergedServerInstructions
 		caps.Prompts = &sdkmcp.PromptCapabilities{}
 	}
 	caps.AddExtension(SkillsExtensionID, map[string]any{"directoryRead": true})
-	srv := &Server{version: version, catalog: catalog, serve: newServeState(opts), authoring: merged}
+	srv := &Server{
+		version: version, catalog: catalog, serve: newServeState(opts), authoring: merged,
+		scopeNote: scopeSummary(catalog.repository()),
+	}
 	for _, opt := range authoring {
 		opt(srv)
 	}
@@ -112,16 +103,17 @@ func newServingServer(version string, catalog *Catalog, opts ServeOptions, autho
 	mcpServer := sdkmcp.NewServer(
 		&sdkmcp.Implementation{Name: name, Title: title, Version: version},
 		&sdkmcp.ServerOptions{
-			Capabilities: caps, Instructions: instructions, Logger: sdkLogger(), PageSize: pageSize,
+			Capabilities: caps, Logger: sdkLogger(), PageSize: pageSize,
 			SetCacheable: cacheable,
 		},
 	)
 	srv.mcpServer = mcpServer
 	mcpServer.AddReceivingMiddleware(tolerantInitializeMiddleware(mcpServer))
 
-	mcpServer.AddReceivingMiddleware(srv.unknownResourceMiddleware())
+	mcpServer.AddReceivingMiddleware(srv.instructionsMiddleware(), srv.unknownResourceMiddleware())
 	srv.registerSkillsExtension()
 	srv.registerSkillResources()
+	srv.registerIndexResource()
 	srv.registerSkillTools()
 	srv.registerServeTools()
 	if merged {
@@ -180,6 +172,14 @@ func (s *Server) unknownResourceMiddleware() sdkmcp.Middleware {
 		return func(ctx context.Context, method string, request sdkmcp.Request) (sdkmcp.Result, error) {
 			if method == methodResourcesRead {
 				if req, ok := request.(*sdkmcp.ReadResourceRequest); ok && req.Params != nil {
+					if strings.HasPrefix(req.Params.URI, contextScheme) {
+						return s.readContextResource(ctx, req)
+					}
+					if s.authoring && isCatalogQuery(req.Params.URI) {
+						// A query value may hold a raw slash, which the registered
+						// URI template does not match: route it here.
+						return s.readAuthoringResource(ctx, req)
+					}
 					if !s.resourceKnown(req.Params.URI) {
 						return nil, resourceNotFound(req.Params.URI)
 					}
@@ -194,6 +194,9 @@ func (s *Server) unknownResourceMiddleware() sdkmcp.Middleware {
 // served skill file, or, on the authoring and merged servers, a config, catalog
 // or item URI (ai-rulez://...).
 func (s *Server) resourceKnown(uri string) bool {
+	if uri == uriIndex {
+		return s.cat().repository() != nil
+	}
 	if cat := s.cat(); cat != nil {
 		if _, served := cat.File(uri); served {
 			return true
@@ -209,17 +212,17 @@ func (s *Server) resourceKnown(uri string) bool {
 
 func (s *Server) registerSkillTools() {
 	addTool[searchSkillsIn](s, toolSpec{
-		name: "search_skills", title: "Search Skills",
+		name: toolSearchSkills, title: "Search Skills",
 		description: "Search the served skills by name, keywords and description (lexical ranking). An empty query lists every skill.",
 		annotations: readOnlyAnnotations(), output: skillSearchOut{},
 	}, s.searchSkillsHandler)
 	addTool[getSkillIn](s, toolSpec{
-		name: "get_skill", title: "Get Skill",
+		name: toolGetSkill, title: "Get Skill",
 		description: "Load one skill: its SKILL.md text, provenance, and the digest of every file",
 		annotations: readOnlyAnnotations(), output: skillOut{},
 	}, s.getSkillHandler)
 	addTool[readSkillFileIn](s, toolSpec{
-		name: "read_skill_file", title: "Read Skill File",
+		name: toolReadSkillFile, title: "Read Skill File",
 		description: fmt.Sprintf("Read a supporting file of a served skill by its skill:// URI. Text files come back as text, binary files as base64 (or pass encoding: base64). A read returns at most %d bytes: continue at next_offset with offset. The result carries the file mode, executable and an interpreter hint.", maxReadChunkBytes),
 		annotations: readOnlyAnnotations(), output: skillOut{},
 	}, s.readSkillFileHandler)
@@ -245,7 +248,7 @@ func (s *Server) searchSkillsHandler(_ context.Context, req *handlers.ToolReques
 			break
 		}
 	}
-	return handlers.ToolSuccess(map[string]any{"profile": s.cat().Profile, "count": len(results), "results": results})
+	return handlers.ToolSuccess(map[string]any{"profile": s.cat().Profile, keyCount: len(results), keyResults: results})
 }
 
 func (s *Server) getSkillHandler(_ context.Context, req *handlers.ToolRequest) (*sdkmcp.CallToolResult, error) {
@@ -341,12 +344,12 @@ func domainLabel(domain string) string {
 // an installed skill came from so an audit log can pin exactly what was loaded.
 func skillSummary(s *CatalogSkill, score int) map[string]any {
 	out := map[string]any{
-		keyName:       s.Name,
-		keyURI:        s.URI,
-		"description": s.Description,
-		"domain":      domainLabel(s.Domain),
-		keyDigest:     s.Digest,
-		"files":       len(s.Files),
+		keyName:        s.Name,
+		keyURI:         s.URI,
+		keyDescription: s.Description,
+		"domain":       domainLabel(s.Domain),
+		keyDigest:      s.Digest,
+		"files":        len(s.Files),
 	}
 	if s.Source != "" {
 		out["source"] = s.Source

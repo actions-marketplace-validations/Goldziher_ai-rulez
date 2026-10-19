@@ -286,6 +286,66 @@ ai-rulez builtins show security --format json
 | ---- | ---- | ------- | ----------- |
 | `--format` | string | `text` | Output format: text, json |
 
+## `ai-rulez cache`
+
+Show or clear the repository index cache
+
+```text
+ai-rulez cache [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez cache status
+ai-rulez cache clear
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--no-local` | bool |  | Ignore the machine-local config.local.* overlay |
+
+## `ai-rulez cache clear`
+
+Remove the index cache of this project
+
+```text
+ai-rulez cache clear [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez cache clear
+ai-rulez cache clear --all
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--all` | bool |  | Remove the index caches of every project in the user cache |
+| `--format` | string | `text` | Output format: text, json |
+| `--no-local` | bool |  | Ignore the machine-local config.local.* overlay |
+
+## `ai-rulez cache status`
+
+Show where the index cache is, its size and its entry count
+
+```text
+ai-rulez cache status [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez cache status
+ai-rulez cache status --format json
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+| `--no-local` | bool |  | Ignore the machine-local config.local.* overlay |
+
 ## `ai-rulez catalog`
 
 List every item with owner, version, tokens, roles and lock status, or a static site
@@ -1063,6 +1123,7 @@ ai-rulez generate --locked
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--accept-findings` | bool |  | With --refresh-remote or [lock] refresh_on_generate: pin a remote tree although its security scan has error findings (review them first), as 'ai-rulez lock --accept-findings' |
 | `--allow-local-drift` | bool |  | Write output even when machine-local config would change files shared with the team |
 | `--check` | bool |  | Verify the committed output matches the sources without writing: list differing files and exit 2 on drift (for CI) |
 | `--discover-org` | bool |  | Also load the organization policy of the repository's GitHub owner (ai-rulez-policy.toml in <owner>/.github); needs a digest from [policy.digests] in the user config or --policy-trust-tofu. A convenience layer, not an anchor: see docs/policy.md |
@@ -1095,6 +1156,7 @@ ai-rulez generate --locked
 | `--policy-trusted-root` | string |  | Sigstore trusted root file for keyless policy signatures (default: the root that ai-rulez trust update cached) |
 | `--profile` | string |  | Profile to generate, or a comma-separated list to compose several (default: from config or 'default'; or AI_RULEZ_PROFILE) |
 | `--recursive` | bool |  | Find and process configuration files recursively |
+| `--refresh-remote` | bool |  | Before generating, re-resolve remote installed skills, includes and skill sources to their latest allowed version and rewrite ai-rulez.lock; the security scan of the new trees runs first and a refusal aborts before any output is written (or set [lock] refresh_on_generate) |
 | `--role` | string |  | Generate the slice of content a role selects instead of a profile, or a comma-separated list to compose several (the union); see 'ai-rulez roles resolve'; mutually exclusive with --profile (or AI_RULEZ_ROLE) |
 | `--strict-config` | bool |  | Fail on unknown or invalid configuration keys instead of warning (env AI_RULEZ_STRICT=1) |
 | `--user` | bool |  | Generate the user-level config (default ~/.config/ai-rulez, or --config) into the home directories each harness reads: ~/.claude, ~/.agents/skills, ~/.codex, ~/.gemini, ~/.config/opencode, ~/.copilot, ~/.pi/agent |
@@ -1441,6 +1503,7 @@ ai-rulez init --domains backend,frontend --yes
 | `--force` | bool |  | Replace an existing configuration directory; the old one is kept as <dir>.bak-<timestamp> |
 | `--format` | string | `text` | Output format: text, json |
 | `--from` | string |  | Import from existing tool files with convert: importer names or project paths (e.g., 'auto', 'rulesync', '.claude,.cursor') |
+| `--minimal` | bool |  | Create only ai-rulez.toml at the project root, with no .ai-rulez/ folder (for skills, MCP servers, lint and the lock; your CLAUDE.md and AGENTS.md stay yours) |
 | `--setup-hooks` | bool |  | Automatically configure git hooks for ai-rulez validation |
 | `--skip-content` | bool |  | Skip creating example content files |
 | `--source` | string |  | Where the content lives: ai-rulez (the .ai-rulez tree, default) or agents (AGENTS.md and .agents/, configured in .agents/ai-rulez.toml) |
@@ -1448,7 +1511,7 @@ ai-rulez init --domains backend,frontend --yes
 
 ## `ai-rulez judge`
 
-Grade instruction files with a model (AI as a judge), without any configuration
+Review agent configuration with models: security, quality and governance, with verified evidence
 
 ```text
 ai-rulez judge [paths...] [flags]
@@ -1457,23 +1520,38 @@ ai-rulez judge [paths...] [flags]
 Examples:
 
 ```bash
-ai-rulez judge --estimate --model openai/gpt-4o-mini
-ai-rulez judge --allow-llm --model openai/gpt-4o-mini
-ai-rulez judge docs/guide.md --allow-llm --model anthropic/claude-haiku-4-5 --min-score 0.8
-ai-rulez judge --allow-llm --rubric rubrics/mine.md --format json
+ai-rulez judge --estimate
+ai-rulez judge --allow-llm
+ai-rulez judge .claude/skills/deploy --allow-llm --fail-on security:medium,governance:high
+ai-rulez judge --changed=origin/main --allow-llm --format sarif > judge.sarif
+ai-rulez judge --allow-llm --skill path:rubrics/acme --skill-for quality=style-rubric
 ```
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--allow-llm` | bool |  | Agree to send the files' content to the model's provider (required to call a model) |
+| `--adjudicator-model` | string |  | Model of the adjudicator, which should be the strongest you use |
+| `--allow-llm` | bool |  | Agree to send the units' content to the model's provider (required to call a model) |
+| `--allow-partial` | bool |  | Exit 0 or 2 by the findings even when some unit was only partly reviewed |
+| `--allow-prompt-override` | bool |  | Let a repository prompt file replace a reviewer's role prompt (an extension needs no flag) |
+| `--attach-claude-md` | bool | `true` | Attach the CLAUDE.md and AGENTS.md files (with their @imports) that apply to each unit |
+| `--attach-rules` | bool | `true` | Attach the path-scoped rules that govern each unit to its governance review |
+| `--cache-readonly` | bool |  | Serve cached answers but store none |
+| `--categories` | string list |  | Categories to run: security, quality, governance (default all) |
+| `--changed` | string |  | Judge only the units that changed since a base: bare --changed is --since HEAD (uncommitted and untracked work), --changed=REV is --since REV |
+| `--concurrency` | int | `0` | Model calls in flight at once (default 4) |
 | `--discover-org` | bool |  | Also load the organization policy of the repository's GitHub owner (ai-rulez-policy.toml in <owner>/.github); needs a digest from [policy.digests] in the user config or --policy-trust-tofu. A convenience layer, not an anchor: see docs/policy.md |
-| `--dry-run` / `-n` | bool |  | List the files, the egress host and model and the token and cost estimate; send nothing |
+| `--dry-run` / `-n` | bool |  | List the units, what is attached, the egress host and models and the token and cost estimate; send nothing |
 | `--estimate` | bool |  | Alias of --dry-run |
-| `--format` | string | `text` | Output format: text, json |
-| `--max-cost` | number | `0.25` | Spend cap in USD (0 removes it; the model must be priced when a cap is set) |
+| `--explain-drops` | bool |  | List in the report every candidate that was dropped, and why |
+| `--fail-on` | string list |  | When a unit fails: <category>:<severity>, <category>:none, score:<n> or <category>:score:<n>, comma separated. Default security:high,governance:high,quality:none (quality findings are advice) |
+| `--format` | string | `text` | Output format: text, json, sarif |
+| `--impact` | bool | `true` | With --changed, also judge the units a changed rule or instruction file applies to |
+| `--max-calls` | int | `0` | Cap on model calls of the whole run (0 means no cap) |
+| `--max-cost` | number | `2` | Spend cap in USD (0 removes it; every model must be priced when a cap is set) |
 | `--max-tokens` | int | `0` | Cap on prompt plus completion tokens of the whole run (0 means no cap) |
-| `--min-score` | number | `0.7` | Lowest passing score, from 0 to 1; a file below it is a finding (exit 2) |
-| `--model` | string |  | Model as provider/model (or AI_RULEZ_LLM_MODEL), for example openai/gpt-4o-mini |
+| `--min-confidence` | string |  | Drop findings below this confidence: low (default), medium, high |
+| `--model` | string |  | Model of the reviewers as provider/model (or AI_RULEZ_LLM_MODEL); the adjudicator uses it too unless --adjudicator-model names another. Default bedrock/global.anthropic.claude-sonnet-5-5 for the reviewers and bedrock/global.anthropic.claude-opus-5-5 for the adjudicator |
+| `--model-for` | string list |  | Model of one role as ROLE=MODEL, where ROLE is security, quality, governance or adjudicator (repeatable) |
 | `--no-cache` | bool |  | Do not read or write the model response cache |
 | `--policy` | string |  | Organization policy: a file, or an https URL pinned with @sha256:<hex> (tighten-only; also AI_RULEZ_POLICY and the managed path). A repository can only add restrictions to it; see docs/policy.md |
 | `--policy-digest` | string |  | The digest (sha256:<hex>) the --policy file or URL must have; a mismatch fails closed (AR741) |
@@ -1489,8 +1567,11 @@ ai-rulez judge --allow-llm --rubric rubrics/mine.md --format json
 | `--price-input` | number | `0` | Price of the model in USD per million input tokens, for a model the price table does not know (use with --price-output) |
 | `--price-output` | number | `0` | Price of the model in USD per million output tokens (use with --price-input) |
 | `--provider` | string |  | Provider prefix for a --model without one (or AI_RULEZ_LLM_PROVIDER) |
-| `--redact` | bool |  | Mask secret-looking text and send the file, instead of skipping it |
-| `--rubric` | string |  | Rubric: builtin:instruction-quality (default) or a Markdown file |
+| `--redact` | bool |  | Mask secret-looking text and send the unit, instead of withholding it |
+| `--rpm` | int | `0` | Model calls started per minute (0 means no limit) |
+| `--since` | string |  | Judge only the units that changed since this git revision: committed, staged, unstaged and untracked work (and, with --impact, the units a changed rule applies to) |
+| `--skill` | string list |  | Rubric skill applied to the governance review: a skill name from the project, or path:DIR (repeatable) |
+| `--skill-for` | string list |  | Rubric skill for one category as CATEGORY=NAME or CATEGORY=path:DIR (repeatable) |
 
 ## `ai-rulez list`
 
@@ -1836,7 +1917,7 @@ ai-rulez lock --content-only
 | `--fail-on-outdated` | bool |  | With --outdated: exit 2 when any source has an allowed update |
 | `--format` | string | `text` | Output format: text, json |
 | `--include-static` | bool |  | Also pin the view that serves static skills too (see mcp --serve-skills --include-static) |
-| `--kind` | string |  | Limit the refresh to include, skill, source or served entries |
+| `--kind` | string |  | Limit the refresh to include, skill, source, marketplace, plugin or served entries |
 | `--offline` | bool |  | With --outdated: refuse to run (it needs the network); use --check to verify the lock offline |
 | `--outdated` | bool |  | Report sources whose version constraint allows a newer tag than the pinned one (uses the network, writes nothing) |
 | `--output` / `-o` | string |  | With --subject: write the JSON statement to this file |
@@ -1860,6 +1941,102 @@ ai-rulez lock --content-only
 | `--subject` | bool |  | Print the lock-subject digest and statement (the thing to sign); reads the lock only |
 | `--targets` | string |  | Also pin the view that serves this preset's rendering of the skills (see mcp --serve-skills --targets) |
 | `--verify-tags` | bool |  | With --check: ask the remotes whether a tag pinned in ai-rulez.lock moved (AR732) or was deleted (AR735); needs the network (also [lock] verify_tags = true) |
+
+## `ai-rulez marketplace`
+
+Manage installed plugin marketplaces
+
+```text
+ai-rulez marketplace [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez marketplace list
+ai-rulez marketplace add acme --source acme/plugins
+```
+
+## `ai-rulez marketplace add`
+
+Add a plugin marketplace from a repository, a local directory or an https URL
+
+```text
+ai-rulez marketplace add <name> [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez marketplace add acme --source acme/plugins
+ai-rulez marketplace add acme --source https://github.com/acme/plugins --version "^1.2"
+ai-rulez marketplace add local --source ./vendor/marketplace
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+| `--include-prerelease` | bool |  | Allow prerelease tags (needs --version) |
+| `--min-release-age` | string |  | Hold back tags younger than this (7d, 12h; needs --version) |
+| `--path` | string |  | Directory of the repository that holds the index (default: the root) |
+| `--ref` | string |  | Branch, tag or commit |
+| `--source` | string |  | Git URL, GitHub owner/repo, local directory or https URL of a marketplace.json (required) |
+| `--tag-prefix` | string |  | Only tags with this prefix are version tags (needs --version) |
+| `--trust` | string |  | Scan level of the plugins read through it: error (default) or warn |
+| `--version` | string |  | Version constraint resolved against the repository's tags (^1.2, ~2.1.0) |
+
+## `ai-rulez marketplace list`
+
+List installed marketplaces
+
+```text
+ai-rulez marketplace list [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez marketplace list
+ai-rulez marketplace list --format json
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+
+## `ai-rulez marketplace remove`
+
+Remove an installed marketplace
+
+```text
+ai-rulez marketplace remove <name> [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez marketplace remove acme --yes
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+| `--yes` / `-y` | bool |  | Skip confirmation prompts |
+
+## `ai-rulez marketplace update`
+
+Re-pin installed marketplaces (and their plugins) in ai-rulez.lock to the current remote commit
+
+```text
+ai-rulez marketplace update [name...] [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez marketplace update
+ai-rulez marketplace update acme
+```
 
 ## `ai-rulez mcp`
 
@@ -1886,7 +2063,9 @@ ai-rulez mcp --allow list_rules --allow generate_outputs
 | `--daemon` | bool |  | Share one long-lived skills server per repository: proxy stdin/stdout to a per-repo daemon, starting it on first use, and fall back to serving in-process when none is reachable (requires --serve-skills) |
 | `--deny` | string list |  | Never serve skills whose name matches one of these glob patterns; wins over --allow (requires --serve-skills) |
 | `--discover-org` | bool |  | Also load the organization policy of the repository's GitHub owner (ai-rulez-policy.toml in <owner>/.github); needs a digest from [policy.digests] in the user config or --policy-trust-tofu. A convenience layer, not an anchor: see docs/policy.md |
+| `--discover-skills` | string |  | Also serve the skills already in the repository: repo (skill directories of the working tree: skills/, .claude/skills at any depth and the configured presets' skill directories, honoring .gitignore) or all (repo plus installed and included skills); either also indexes nested AGENTS.md, CLAUDE.md, GEMINI.md, rules and agents by scope for find_context, load_context and the path and scope arguments of find_skill; a bare --discover-skills means repo; default is [mcp] discover_skills, else off (requires --serve-skills) |
 | `--domain` | string list |  | Only serve skills of these domains; 'root' selects skills in no domain (requires --serve-skills) |
+| `--exclude` | string list |  | Glob, relative to the project root, of paths repository discovery never reads (skill directories and the context index: CLAUDE.md, AGENTS.md, rules, agents); repeatable, and added to [mcp] exclude; ** crosses directories, a pattern without a slash matches at any depth (requires --serve-skills and --discover-skills or [mcp] discover_skills) |
 | `--frozen` | bool |  | Never use the network and require ai-rulez.lock to cover every remote include, installed skill and skill source (requires --serve-skills) |
 | `--include-static` | bool |  | Also serve skills whose delivery is static (requires --serve-skills) |
 | `--max-clone-bytes` | int | `0` | Largest git skill source clone in bytes for sources that set no max_clone_bytes; overrides AI_RULEZ_MAX_CLONE_BYTES; 0 uses the environment variable, then 256 MiB (requires --serve-skills) |
@@ -1908,9 +2087,10 @@ ai-rulez mcp --allow list_rules --allow generate_outputs
 | `--reload-interval` | duration | `0s` | How often to check skill files for changes; default 2s (requires --serve-skills) |
 | `--role` | string |  | Serve only the skills of this role (see 'ai-rulez roles list'), with the delivery the role sets; it is also the default role of find_skill (or AI_RULEZ_ROLE; requires --serve-skills) |
 | `--root` | string |  | Directory the authoring tools may read and write; working_directory must lie inside it (default: the current directory) |
-| `--serve-skills` | bool |  | Serve skills read-only over the MCP Skills extension instead of the authoring tools |
+| `--serve-skills` | bool |  | Serve skills read-only over the MCP Skills extension instead of the authoring tools (default: [mcp] serve_skills, else off) |
 | `--source` | string list |  | Serve the skills of a source, repeatable: [git+]<url>[@<tag\|commit>][#<subdir>] or a local directory (requires --serve-skills) |
 | `--targets` | string |  | Preset whose rendering of the skills to serve (default: first configured preset with skills; requires --serve-skills) |
+| `--tools` | string list |  | Register only these tools, repeatable or comma separated (default: [mcp] tools, else every tool); an unknown name is an error that lists the valid ones |
 | `--usage-log` | string |  | Append one identifier-only JSON line per load_skill to this file (requires --serve-skills) |
 | `--usage-sink` | string |  | Shell command that receives each load_skill usage line on stdin (requires --serve-skills) |
 
@@ -2017,6 +2197,112 @@ ai-rulez okf validate https://github.com/acme/kb@v1.2.0#docs --format json
 | ---- | ---- | ------- | ----------- |
 | `--fail-on` | string | `error` | Lowest severity that fails the run: error, warning, info or none |
 | `--format` | string | `text` | Output format: text, json |
+
+## `ai-rulez plugin`
+
+Manage installed plugins imported from marketplaces or repositories
+
+```text
+ai-rulez plugin [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez plugin list
+ai-rulez plugin install formatter --from acme
+```
+
+## `ai-rulez plugin install`
+
+Install a plugin from a marketplace, a repository or a local directory
+
+```text
+ai-rulez plugin install <name> [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez plugin install formatter --from acme
+ai-rulez plugin install tools --source acme/tools --exclude hooks
+ai-rulez plugin install tools --source acme/tools --enable-hooks --name-prefix acme-
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--domain` | string |  | Place the imported content in this domain |
+| `--enable-hooks` | bool |  | Import the plugin's hooks (they run commands on every machine) |
+| `--enable-mcp` | bool | `true` | Import the plugin's MCP servers |
+| `--entry` | string |  | Marketplace entry to install when it is not called like the plugin |
+| `--exclude` | string list |  | Do not import these kinds |
+| `--format` | string | `text` | Output format: text, json |
+| `--from` | string |  | Name of an installed marketplace to install from |
+| `--include` | string list |  | Import only these kinds: skills, agents, commands, hooks, mcp, rules |
+| `--include-prerelease` | bool |  | Allow prerelease tags (needs --version) |
+| `--layout` | string |  | Force the plugin layout: claude, codex, gemini, cursor or agent-plugins |
+| `--min-release-age` | string |  | Hold back tags younger than this (needs --version) |
+| `--name-prefix` | string |  | Prefix for every imported name |
+| `--path` | string |  | Directory of the plugin inside the repository |
+| `--profile` | string list |  | Restrict the imported content to these profiles |
+| `--ref` | string |  | Branch, tag or commit |
+| `--source` | string |  | Git URL, GitHub owner/repo or local directory of the plugin |
+| `--tag-prefix` | string |  | Only tags with this prefix are version tags (needs --version) |
+| `--trust` | string |  | Scan level: error (default) or warn |
+| `--version` | string |  | Version constraint for a plugin installed from --source |
+
+## `ai-rulez plugin list`
+
+List installed plugins
+
+```text
+ai-rulez plugin list [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez plugin list
+ai-rulez plugin list --format json
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+
+## `ai-rulez plugin remove`
+
+Remove an installed plugin
+
+```text
+ai-rulez plugin remove <name> [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez plugin remove formatter --yes
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+| `--yes` / `-y` | bool |  | Skip confirmation prompts |
+
+## `ai-rulez plugin update`
+
+Re-pin installed plugins in ai-rulez.lock to their current remote commit
+
+```text
+ai-rulez plugin update [name...] [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez plugin update
+ai-rulez plugin update formatter
+```
 
 ## `ai-rulez profile`
 
@@ -2683,8 +2969,8 @@ Examples:
 
 ```bash
 ai-rulez sbom
-ai-rulez sbom --format spdx-json --output sbom.spdx.json
-ai-rulez sbom --check
+ai-rulez sbom --type spdx-json --output sbom.spdx.json
+ai-rulez sbom --output sbom.cdx.json --check
 ```
 
 | Flag | Type | Default | Description |
@@ -2732,6 +3018,7 @@ ai-rulez scan
 ai-rulez scan --recursive
 ai-rulez scan --format sarif --output scan.sarif
 ai-rulez scan --changed --fail-on warning
+ai-rulez scan --changed=origin/main
 ai-rulez scan --path vendor/skills
 ```
 
@@ -2740,14 +3027,16 @@ ai-rulez scan --path vendor/skills
 | `--allow-egress` | string list |  | With --external, allow the named [[lint.external]] scanners that declare egress = true to run (repeatable) |
 | `--baseline` | string |  | Accept the findings recorded in this baseline file (default: <config dir>/lint-baseline.json when it exists); only new findings count toward the exit code |
 | `--baseline-reason` | string |  | With --update-baseline, the reason stored on new entries (required for security findings) |
-| `--changed` | bool |  | Shorthand for --since HEAD: only files with uncommitted or untracked changes |
+| `--changed` | string |  | Like --since, with an optional base: bare --changed is --since HEAD (only files with uncommitted or untracked changes) and --changed=REV is --since REV |
 | `--discover-org` | bool |  | Also load the organization policy of the repository's GitHub owner (ai-rulez-policy.toml in <owner>/.github); needs a digest from [policy.digests] in the user config or --policy-trust-tofu. A convenience layer, not an anchor: see docs/policy.md |
 | `--dry-run` / `-n` | bool |  | With --external, print what each scanner would run (command, staged files, environment names, isolation, cache state) and start nothing |
+| `--exclude` | string list |  | Leave the files matching this glob (relative to the project root, for example "x/src/public/skills/**") out of the files found by convention, --path and --glob; works without a configuration. Findings in the configured content tree are dropped with [lint] ignore_paths in config.toml (repeatable) |
 | `--external` | bool |  | Also run the scanners configured in [[lint.external]] and merge their findings |
 | `--fail-on` | string |  | Lowest severity that exits 2: error (default), warning, info or none |
 | `--format` | string | `text` | Output format: text, json, sarif, github, junit, markdown |
 | `--glob` | string list |  | Also lint the files matching this glob, relative to the project root (repeatable, for example "catalog/**/*.json"). A matched file that is not linted is named on stderr as "<file>: not linted (<reason>)" and in the JSON report's notices, and a glob that matches nothing warns |
 | `--lint-profile` | string |  | Lint preset: default, strict or permissive (overrides [lint] profile) |
+| `--min-severity` | string |  | With --write-baseline, record only findings of at least this severity (info, warning, error) |
 | `--no-local` | bool |  | Ignore the machine-local config.local.* overlay and local/ content |
 | `--no-scan-cache` | bool |  | With --external, ignore and do not update the scanner result cache |
 | `--output` / `-o` | string |  | Write the report to this file instead of stdout |
@@ -2764,9 +3053,11 @@ ai-rulez scan --path vendor/skills
 | `--policy-signer-key` | string list |  | PEM public key trusted to sign the policy (repeatable; also AI_RULEZ_POLICY_SIGNER_KEY and [[policy.signers]] in the user config) |
 | `--policy-trust-tofu` | bool |  | Accept the digest of an unpinned --policy URL once, in a terminal, and record it in the user cache; pin it afterwards |
 | `--policy-trusted-root` | string |  | Sigstore trusted root file for keyless policy signatures (default: the root that ai-rulez trust update cached) |
-| `--reason` | string |  | With --write-baseline, why the findings are accepted (stored on each new entry) |
+| `--reason` | string |  | With --write-baseline, why the findings are accepted (stored on each new entry); {rule}, {severity} and {scanner} are replaced per entry |
+| `--reason-for` | string list |  | With --write-baseline, RULE=text: the reason of new entries of that rule (a glob; repeatable); --reason covers the rest |
 | `--recursive` | bool |  | Scan every configuration file found recursively |
 | `--repo-root` | string |  | Repository root that repo-relative paths and git-tracked globs resolve against (env AI_RULEZ_REPO_ROOT; default: the git toplevel, else the config's parent directory) |
+| `--rule` | string list |  | With --write-baseline, record only findings of this scanner rule id, scanner:rule or AR code (a glob; repeatable) |
 | `--scanner-baseline` | string |  | With --external, the scanner baseline file (default: [lint.scanner_policy] baseline, else <config dir>/scanner-baseline.json) |
 | `--show-suppressed` | bool |  | With --external, also show scanner results the tool marked suppressed, as info |
 | `--since` | string |  | Report only findings in files changed since this git revision (committed, staged, unstaged and untracked) and in files that refer to them; references are still resolved against the whole tree |
@@ -2884,6 +3175,27 @@ ai-rulez search --eval search-cases.yaml --baseline result.json --max-flips 0
 | `--role` | string |  | Search only the skills of this role (see 'ai-rulez roles list'); mutually exclusive with --profile |
 | `--source` | string list |  | Also search the skills of a source, repeatable: [git+]<url>[@<tag\|commit>][#<subdir>] or a local directory |
 | `--targets` | string |  | Preset whose rendering of the skills to search |
+
+## `ai-rulez session-start`
+
+Regenerate outputs and brief the agent when a remote session starts (SessionStart hook)
+
+```text
+ai-rulez session-start [flags]
+```
+
+Examples:
+
+```bash
+echo '{"source":"startup"}' | CLAUDE_CODE_REMOTE=true ai-rulez session-start
+ai-rulez session-start --when always --generate-mode plain
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--generate-mode` | string |  | Override [session_start] mode: "auto", "locked", "frozen" or "plain" |
+| `--timeout` | int | `0` | Override [session_start] timeout, in seconds |
+| `--when` | string |  | Override [session_start] when: "remote" or "always" |
 
 ## `ai-rulez show`
 
@@ -3101,11 +3413,23 @@ ai-rulez skill install my-skill --source ./local-repo --path custom/path
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--domain` | string |  | Place the skills in this domain, so a profile or role selects them by domain |
+| `--exclude` | string list |  | Glob of skill directory names to skip; wins over --include (repeatable) |
 | `--format` | string | `text` | Output format: text, json |
+| `--include` | string list |  | Glob of skill directory names to install from a directory of skills (repeatable) |
+| `--include-prerelease` | bool |  | Let --version match pre-release tags |
 | `--local` | bool |  | Write to the machine-local config.local.* overlay instead of the shared config |
+| `--local-override` | string |  | Directory used instead of the source while it exists (local development of a remote skill) |
+| `--min-release-age` | string |  | Skip tags younger than this, such as 7d (holds back brand-new releases) |
+| `--name-prefix` | string |  | Prefix added to every installed skill name |
 | `--path` | string |  | Path within repo to skill directory (defaults to skills/<name>) |
+| `--profile` | string list |  | Restrict the skills to these profiles (repeatable) |
 | `--ref` | string |  | Git reference: branch, tag, or commit hash |
+| `--resources` | string list |  | Extra file patterns to bundle with each skill, "!" removes (repeatable) |
 | `--source` | string |  | Git URL or local path (required) |
+| `--tag-prefix` | string |  | Only consider tags with this prefix when resolving --version, such as v or skills/ |
+| `--trust` | string |  | Scan level for the installed skills: error (default) or warn |
+| `--version` | string |  | Version range of the source's tags, such as ^1.2 (instead of --ref) |
 
 ## `ai-rulez skill list`
 
@@ -3562,7 +3886,7 @@ ai-rulez update --kind include --write-config
 | `--discover-org` | bool |  | Also load the organization policy of the repository's GitHub owner (ai-rulez-policy.toml in <owner>/.github); needs a digest from [policy.digests] in the user config or --policy-trust-tofu. A convenience layer, not an anchor: see docs/policy.md |
 | `--dry-run` / `-n` | bool |  | Show what would change and write nothing |
 | `--format` | string | `text` | Output format: text, json |
-| `--kind` | string |  | Limit the update to include, skill or source |
+| `--kind` | string |  | Limit the update to include, skill, source, marketplace or plugin |
 | `--major` | bool |  | Handle only sources that have a newer major version: print the constraint that would take it |
 | `--offline` | bool |  | Refuse to run: update reads the remote's tags |
 | `--policy` | string |  | Organization policy: a file, or an https URL pinned with @sha256:<hex> (tighten-only; also AI_RULEZ_POLICY and the managed path). A repository can only add restrictions to it; see docs/policy.md |
@@ -3594,6 +3918,7 @@ Examples:
 ai-rulez validate
 ai-rulez validate --strict
 ai-rulez validate --changed
+ai-rulez validate --changed=origin/main
 ai-rulez validate --explain AR001
 ai-rulez validate --format sarif --output ai-rulez.sarif
 ai-rulez validate --fix --dry-run
@@ -3608,10 +3933,11 @@ ai-rulez validate --outputs
 | `--approvals-base` | string |  | Report approvals added since this git revision for content that also changed since it (AR716) |
 | `--baseline` | string |  | Accept the findings recorded in this baseline file (default: <config dir>/lint-baseline.json when it exists); only new findings count toward the exit code |
 | `--baseline-reason` | string |  | With --update-baseline, the reason stored on new entries (required for security findings) |
-| `--changed` | bool |  | Shorthand for --since HEAD: only files with uncommitted or untracked changes |
+| `--changed` | string |  | Like --since, with an optional base: bare --changed is --since HEAD (only files with uncommitted or untracked changes) and --changed=REV is --since REV |
 | `--config-only` | bool |  | Check the configuration file only and skip the content checks |
 | `--discover-org` | bool |  | Also load the organization policy of the repository's GitHub owner (ai-rulez-policy.toml in <owner>/.github); needs a digest from [policy.digests] in the user config or --policy-trust-tofu. A convenience layer, not an anchor: see docs/policy.md |
 | `--dry-run` / `-n` | bool |  | With --fix or --fix-unsafe, print the unified diff and change nothing |
+| `--exclude` | string list |  | Leave the files matching this glob (relative to the project root, for example "x/src/public/skills/**") out of the files found by convention, --path and --glob; works without a configuration. Findings in the configured content tree are dropped with [lint] ignore_paths in config.toml (repeatable) |
 | `--explain` | string |  | Print what a rule (code or name, for example AR001) checks, why, examples and how to suppress it, then exit |
 | `--external` | bool |  | Also run the scanners configured in [[lint.external]] and merge their findings |
 | `--fail-on` | string |  | Lowest severity that exits 2: error (default), warning, info or none |
@@ -3621,6 +3947,7 @@ ai-rulez validate --outputs
 | `--glob` | string list |  | Also lint the files matching this glob, relative to the project root (repeatable, for example "catalog/**/*.json"). A matched file that is not linted is named on stderr as "<file>: not linted (<reason>)" and in the JSON report's notices, and a glob that matches nothing warns |
 | `--lint-profile` | string |  | Lint preset: default, strict or permissive (overrides [lint] profile; distinct from the generation --profile) |
 | `--mcp-user-scope` | bool |  | Also check MCP servers against the configured harnesses' user and local scopes (reads files outside the project, for example ~/.claude.json); needs --strict |
+| `--min-severity` | string |  | With --write-baseline, record only findings of at least this severity (info, warning, error) |
 | `--no-local` | bool |  | Ignore the machine-local config.local.* overlay and local/ content (the view a teammate without them sees) |
 | `--no-scan-cache` | bool |  | With --external, ignore and do not update the scanner result cache |
 | `--offline` | bool |  | Skip fetching remote includes, use cached content only (as generate --offline) |
@@ -3638,9 +3965,11 @@ ai-rulez validate --outputs
 | `--policy-signer-key` | string list |  | PEM public key trusted to sign the policy (repeatable; also AI_RULEZ_POLICY_SIGNER_KEY and [[policy.signers]] in the user config) |
 | `--policy-trust-tofu` | bool |  | Accept the digest of an unpinned --policy URL once, in a terminal, and record it in the user cache; pin it afterwards |
 | `--policy-trusted-root` | string |  | Sigstore trusted root file for keyless policy signatures (default: the root that ai-rulez trust update cached) |
-| `--reason` | string |  | With --write-baseline, why the findings are accepted (stored on each new entry) |
+| `--reason` | string |  | With --write-baseline, why the findings are accepted (stored on each new entry); {rule}, {severity} and {scanner} are replaced per entry |
+| `--reason-for` | string list |  | With --write-baseline, RULE=text: the reason of new entries of that rule (a glob; repeatable); --reason covers the rest |
 | `--recursive` | bool |  | Validate every configuration file found recursively |
 | `--repo-root` | string |  | Repository root that repo-relative paths and git-tracked globs resolve against (env AI_RULEZ_REPO_ROOT; default: the git toplevel, else the config's parent directory) |
+| `--rule` | string list |  | With --write-baseline, record only findings of this scanner rule id, scanner:rule or AR code (a glob; repeatable) |
 | `--scanner-baseline` | string |  | With --external, the scanner baseline file (default: [lint.scanner_policy] baseline, else <config dir>/scanner-baseline.json) |
 | `--show-policy` | bool |  | Print the effective organization policy with the origin of every value and what the repository tried to loosen (text, or JSON with --format json), then exit |
 | `--show-suppressed` | bool |  | With --external, also show scanner results the tool marked suppressed, as info |

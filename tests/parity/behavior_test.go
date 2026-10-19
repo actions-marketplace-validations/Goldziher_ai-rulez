@@ -1,7 +1,6 @@
 package parity_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -36,6 +35,11 @@ presets = ["claude"]
 # The parity pairs check read-only reports on one project. A strict render writes
 # the self server into .mcp.json, which would perturb them; keep it out here.
 self_server = false
+
+[session_start]
+# The hook pins the version of the binary that renders it, and the tool side runs in
+# this test process (version "dev") while the command runs the built binary.
+generate = false
 
 [governance]
 require_approval = ["kind:rule"]
@@ -113,7 +117,7 @@ func servingSession(t *testing.T, dir string) *sdkmcp.ClientSession {
 	//nolint:gosec // G204: the test runs the binary it built
 	cmd := exec.CommandContext(ctx, testutil.SetupTestBinary(t), "mcp", "--serve-skills")
 	cmd.Dir = dir
-	var stderr bytes.Buffer
+	var stderr testutil.SyncBuffer
 	cmd.Stderr = &stderr
 	session, err := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "parity", Version: "1"}, nil).Connect(ctx, &sdkmcp.CommandTransport{Command: cmd}, nil)
 	require.NoError(t, err, stderr.String())

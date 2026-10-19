@@ -43,14 +43,49 @@ repository can loosen.
 - **Supply-chain-grade trust.** Sigstore signing, in-toto/DSSE attestations, CycloneDX/SPDX SBOMs and reviewer approvals, so "what prompt is actually running in production" has a verifiable answer.
 - **Org-wide policy, not just repo config.** A central [policy](docs/policy.md) sets tighten-only floors; `verify` and CI gates enforce it everywhere.
 
-| Stage | What happens | Commands | Docs |
-| ----- | ------------ | -------- | ---- |
-| **Author** | Rules, context, skills, agents, commands and checks as markdown in `.ai-rulez/`, with domains, profiles, roles and includes. `.ai-rulez/` is an [OKF](docs/okf.md) bundle: OKF is the internal format, and `init`, `add` and the MCP tools write it. A pre-OKF tree still loads, with a deprecation notice; `migrate okf` converts it. Or keep `AGENTS.md` and `.agents/` as the source with `source = "agents"`: ai-rulez translates them to every other tool and never writes into them ([guide](docs/agents-source.md)). | `init`, `add`, `convert`, `import`, `migrate okf` | [Author](docs/configuration.md) |
-| **Generate** | Native files for 52 harnesses (Claude Code, Cursor, Codex, Copilot, Gemini CLI, OpenCode, Devin, Kilo and more), per project or per user. | `generate`, `doctor`, `clean` | [Harnesses](docs/harnesses.md) |
-| **Bundle** | Distributable plugin bundles, an Agent Plugins package, an OKF bundle, an ARD manifest, `AGENTS.md` and `llms.txt`. | `generate --plugin`, `export okf` | [Plugins](docs/plugins.md) |
-| **Lint and validate** | Content and security checks with stable `AR` codes, plus each standard's own schema or rules. Works in a repository with no ai-rulez config (`--path`, `--glob` and `--outputs` pick what to lint); `judge` grades instruction files with a model, also without config. | `validate`, `scan`, `judge`, `okf validate`, `verify` | [Validate](docs/strict-validation.md) |
-| **Govern** | A content-pinning lock, reviewer approvals, Sigstore signing, an organization policy and an SBOM. | `lock`, `approve`, `sign`, `verify --attestation`, `sbom` | [Trust model](docs/trust-model.md) |
-| **Publish** | Reproducible, checksummed release artifacts to GitHub releases, npm, OCI and marketplaces. | `publish` | [Publish](docs/publish.md) |
+## Features
+
+The table covers the implemented capabilities. The [CLI reference](docs/cli-reference.md) lists every command and flag;
+[standards](#standards) below distinguishes supported formats from partial integrations.
+
+| Feature | What it does | Commands / configuration | Docs |
+| ------- | ------------ | ------------------------ | ---- |
+| Content authoring | Manage rules, context, skills with scripts and references, agents, commands and code-review checks. | `init`, `add`, `edit`, `show`, `list`, `remove` | [Configuration](docs/configuration.md), [Skills](docs/skills.md), [Checks](docs/checks.md) |
+| Open-standard sources | Use `.ai-rulez/` as an OKF bundle, or author in `AGENTS.md` and `.agents/` without generation overwriting that source. Convert a pre-OKF content tree in place. | `source = "agents"`, `migrate okf`, `export okf`, `import okf`, `okf validate` | [OKF](docs/okf.md), [Agents source](docs/agents-source.md) |
+| Domains, profiles and roles | Organize content by domain, select domains by profile, and compose roles that filter items and control skill modes. | `domain`, `profile`, `roles`, `--profile`, `--role` | [Domains and profiles](docs/domains.md), [Roles](docs/roles.md) |
+| Configuration layers and local overrides | Merge named TOML layers, a developer's local overlay and user-level settings; inspect the effective local changes. | `config layers`, `local`, `config.<name>.toml`, `--no-local` | [Layers](docs/configuration.md#layered-configuration), [Local configuration](docs/local-overrides.md) |
+| Shared includes and skill installation | Reuse local or Git content, choose merge precedence, install individual skills and load skill sources with pinned revisions or version ranges. | `include`, `skill install/list/remove/update`, `includes`, `installed_skills`, `skill_sources` | [Includes](docs/includes.md), [Installed skills](docs/installed-skills.md) |
+| Builtin content | Select bundled domains and individual guidance items, or exclude items from a selected pack. | `builtins list/show`, `builtins` | [Builtin domains](docs/domains.md) |
+| Import and migration | Convert existing harness files and supported third-party layouts with a lossiness report; migrate a 4.x configuration to v5. | `convert`, `migrate v5` | [Conversion](docs/cli.md#convert-command), [Migration](docs/migration-v5.md) |
+| Native generation | Render the file layouts, frontmatter and settings of 52 built-in harnesses, including Claude Code, Cursor, Codex, Copilot and Gemini CLI. | `generate`, `presets` | [Harness matrix](docs/harnesses.md) |
+| Custom presets | Define templates or provider-backed presets for an additional harness and its supported content and settings. | `presets` inline tables, provider specs | [Custom presets](docs/profiles.md), [Provider-backed presets](docs/configuration.md#provider-backed-presets-full-parity) |
+| Hooks, permissions and MCP settings | Translate shared hooks, allow/deny rules and MCP server definitions to each harness's supported native settings; report unsupported translations. | `hooks`, `permissions`, `mcp_servers` | [Settings](docs/settings.md), [Permissions](docs/permissions.md) |
+| Remote-session setup | A `SessionStart` hook (on by default for Claude Code) that runs `ai-rulez generate` when a cloud session starts. | `[session_start]`, `session-start` | [Remote sessions](docs/session-start.md) |
+| Generated-file guard | Install a supported harness's PreToolUse hook to block agent edits to generated files. | `[guard] generated = true`, `guard` | [Guard](docs/cli.md#guard-command) |
+| User scope and monorepos | Generate user-level assistant configuration, watch source changes, or process nested project roots with ordered reports. | `generate --user`, `generate --watch`, `generate/validate --recursive` | [User scope](docs/user-scope.md), [Monorepos](docs/monorepo.md) |
+| Drift, cleanup and diagnostics | Preview a generation plan, detect output drift, remove generated files and diagnose configuration, locks, tools and MCP placeholders. | `generate --dry-run/--emit-plan/--check`, `clean`, `doctor` | [CLI reference](docs/cli.md), [Architecture](docs/architecture.md) |
+| Plugin and marketplace authoring | Bundle runtime-specific plugins and marketplace indexes, including multi-plugin definitions, Agent Plugins and opt-in Pi packages. | `generate --plugin`, `plugin`, `plugins_authoring`, `marketplaces_authoring` | [Plugins](docs/plugins.md), [Agent Plugins](docs/agent-plugins.md) |
+| Discovery and documentation formats | Generate `AGENTS.md` and `llms.txt`; emit ARD manifests and experimental MCP Server Cards. | `agents_md`, `llms-txt` preset, `publish --emit`, `publish emit` | [AGENTS.md](docs/agents-md.md), [llms.txt](docs/llms-txt.md), [ARD](docs/ard.md), [MCP Server Cards](docs/mcp-server-card.md) |
+| Release artifacts and publishing | Build reproducible archives, manifests and checksums, optionally sign them, verify a dist directory and explicitly upload to GitHub releases, npm or OCI. | `publish`, `publish verify`, `--to`, `--execute --yes` | [Publishing](docs/publish.md) |
+| Static validation and security scanning | Check config, content, scripts and conventional harness files with stable `AR` codes, without requiring an ai-rulez config. Scope by paths, globs or Git changes; use fixes, suppressions, baselines and JSON/SARIF reports. | `validate`, `scan`, `--strict`, `--path`, `--glob`, `--outputs`, `--changed` | [Validation and security rules](docs/strict-validation.md), [Harness traps](docs/harness-traps.md) |
+| External scanners | Run configured scanner programs with explicit execution/egress controls and merge their findings into validation reports. | `lint.external`, `scanners list/doctor`, `validate/scan --external` | [Scanner integrations](docs/strict-validation.md) |
+| Repository verifiers | Run declared deterministic checks, opt into command or LLM predicates, link checks to rules, test fixtures and calibrate model-backed checks. | `verifiers run/list/explain/test/calibrate/suggest`, `validate --verifiers` | [Verifiers](docs/verifiers.md) |
+| Model-based judge | Review agent configuration for security, quality and governance with quoted evidence, an adjudicator, rubric skills, change-impact selection and explicit incomplete coverage. Estimate before sending; cap spend and emit JSON or SARIF. | `judge`, `--estimate`, `--allow-llm`, `--changed`, `--skill`, `--fail-on` | [Judge](docs/judge.md) |
+| Rubric review and patch proposals | Score configured items offline or with a semantic model, calibrate a rubric's gate and propose verified patches for findings. | `review`, `review calibrate/explain/fix`, `rubric` | [Review](docs/review.md) |
+| Skill evaluation | Run harness-neutral eval cases through adapters; measure pass rate, trigger precision/recall, ablation and cost; import scenarios and calibrate estimates. | `eval run/import/calibrate-estimate` | [Evals](docs/evals.md) |
+| Skill improvement (experimental) | Run an external optimizer on a copy, gate candidates against held-out evals, inspect results, apply an accepted change or open an isolated PR. | `improve run/show/apply/pr/clean/adapters` | [Improve](docs/improve.md) |
+| Locks and source updates | Pin remote sources, installed skills, authored content and outputs; check drift, inspect outdated sources and update version-range pins. | `lock`, `lock --check/--diff/--outdated`, `update`, `skill update` | [Lock file](docs/lockfile.md) |
+| Organization policy | Apply central floors for sources, approvals, signatures, execution and model use that repository settings cannot loosen. | `--policy`, `AI_RULEZ_POLICY`, `validate --show-policy` | [Policy](docs/policy.md), [Trust model](docs/trust-model.md) |
+| Reviewer approvals | Bind approvals to content digests, review diffs, revoke or deny content, enforce authorized reviewers and verify signed approvals. | `approve`, `verify --approvals` | [Approvals](docs/approvals.md) |
+| Signatures and attestations | Sign locks, bundles, skills, SBOMs and policies; verify Sigstore bundles, in-toto/DSSE attestations and publisher provenance. | `sign`, `verify --attestation/--self/--plugin`, `trust update` | [Signing](docs/signing.md) |
+| Software bills of materials | Inventory AI content, dependencies and MCP packages in CycloneDX 1.6 or SPDX 2.3; detect SBOM drift and enforce lock and pin gates. | `sbom`, `sbom --check -o <file>`, `--require-lock`, `--strict-pins`, `--type spdx-json` | [SBOM](docs/sbom.md) |
+| MCP management and skill serving | Expose configuration tools and reports to assistants; serve skills and supporting resources on demand with role filters and session budgets. Select a read-only server or reuse a local daemon. | `mcp`, `--serve-skills`, `--read-only`, `--daemon` | [MCP server](docs/mcp-server.md) |
+| Skill search | Rank skills lexically, by vectors or with hybrid embeddings, maintain the index, evaluate ranking and mine queries from usage. | `search`, `search index/status/mine`, `search --eval` | [Search](docs/search.md) |
+| Catalog and inventory | Inspect item metadata, owners, roles, dependencies and lock status; join eval/usage results, compare catalogs and build a static catalog website. | `catalog`, `catalog diff`, `catalog --html` | [Catalog](docs/catalog.md) |
+| Token and context budgets | Report generated prompt tokens, compare profiles and roles, identify costly content and gate always-loaded or on-demand budgets. | `tokens`, `cost`, `--budget`, `--on-demand-budget` | [Token reports](docs/cli.md#tokens-command), [Cost reports](docs/cli.md#cost-command) |
+| Usage and item-load telemetry | Opt into identifier-only skill invocation, feedback and item-load records; report usage and optionally export item-load telemetry through OTLP. | `telemetry record/report/feedback/enable/export` | [Usage telemetry](docs/usage-telemetry.md), [Item loads and OTLP](docs/telemetry.md) |
+| Shared model access | Route model calls through liter-llm, including AWS Bedrock credential refresh and OpenAI-compatible gateways, with network consent, budgets, authenticated caching and redacted diagnostics. | `[llm]`, `llm doctor`, `llm estimate` | [LLM access](docs/llm.md) |
+| Automation and embedding | Use the composite GitHub Action, pre-commit/prek, Poly or Lefthook; call the experimental Go API to load, validate, plan/apply generation and manage locks. Shell completion and JSON schemas support other integrations. | [Action](action.yml), `init --setup-hooks`, `completion`, `pkg/airulez` | [Git hooks](#git-hooks), [GitHub Actions](#github-actions), [Go API](docs/embedding.md), [Schemas](docs/schema.md) |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Goldziher/ai-rulez/main/docs/assets/quickstart.gif" alt="ai-rulez init and generate: one .ai-rulez source becomes the native files of four AI tools" width="820" />
@@ -200,6 +235,8 @@ ai-rulez validate --strict
 ```
 
 The module path needs `/v5`; without it `@latest` resolves to an old build.
+This local build needs cgo, a C toolchain and the Go module cache at runtime.
+For a statically linked build, use `task build` from a clone; see [source installation](docs/installation.md).
 
 </details>
 
@@ -345,8 +382,12 @@ An organization [policy](docs/policy.md) sets tighten-only floors a repository c
 - **Telemetry.** Item-load records with an optional OTLP export. See [telemetry](docs/telemetry.md).
 - **Evals and improve.** `ai-rulez eval` scores skills; `improve` (experimental) optimizes them behind a held-out eval
   gate. See [evals](docs/evals.md) and [improve](docs/improve.md).
-- **Judge.** `ai-rulez judge` grades `AGENTS.md` and `.agents/*` with a model from the command line alone, with no config
-  file: `ai-rulez judge --estimate --model openai/gpt-4o-mini`, then `--allow-llm` to send. See [judge](docs/judge.md).
+- **Judge.** `ai-rulez judge` reviews skills, agents, commands, rules, `CLAUDE.md`, `AGENTS.md`, MCP and settings files
+  with models, from the command line alone: security, quality and governance reviewers, a verifier that checks quoted
+  evidence, an independent adjudicator, and scores computed in code. Failed rubric criteria without a verifiable quote
+  are reported separately as unit-level findings. Governance reads the rules and
+  `CLAUDE.md` files that apply to each unit, nested `.claude/` directories at any depth. `ai-rulez judge --estimate`, then
+  `--allow-llm` to send; `--changed=origin/main` for a pull request, `--format sarif` for code scanning. See [judge](docs/judge.md).
 - **Cost and inventory.** `tokens`, `cost`, `catalog` and `search` report what the configuration contains and costs.
 
 Existing project on 4.x? Run `ai-rulez migrate v5 --dry-run`, then see [Migrating to v5](docs/migration-v5.md).
@@ -368,7 +409,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/ai-rulez
-    rev: v5.3.0
+    rev: v5.5.3
     hooks:
       - id: ai-rulez-recursive   # generate: write outputs for every nested .ai-rulez/ root
       - id: ai-rulez-validate    # validate --recursive: content, security and link checks
@@ -399,7 +440,7 @@ repository needs:
 [[hooks.sources]]
 id = "ai-rulez"
 git = "https://github.com/Goldziher/ai-rulez.git"
-revision = "v5.3.0"
+revision = "v5.5.3"
 hooks = ["ai-rulez-recursive", "ai-rulez-plugin-verify"]
 ```
 
@@ -452,9 +493,15 @@ the release's `checksums.txt`, caches it (keyed by OS, arch and the resolved ver
 toolchain, Node or Python needed in the job. It reuses the same `scripts/pre-commit/run-ai-rulez.sh`
 download-and-verify logic the pre-commit hooks above use, so the two stay in sync.
 
+Use `Goldziher/ai-rulez@v5` for compatible action updates: publishing a stable v5 release advances
+this floating tag after all distribution jobs succeed. Pin a full release tag or commit SHA to fix
+the action code. The action ref and installed CLI version are independent: set `version` as well
+to pin the binary; its default `latest` can eventually select a newer major release.
+
 | | |
 | --- | --- |
 | **Input** `version` | `X.Y.Z`, `vX.Y.Z`, or `latest` (default). Optional — omit it to always use the newest release. |
+| **Inputs** `llm-*` | Optional provider, model, gateway, credential variable name, network opt-in, budgets and other LLM settings exported to later steps. [Full reference](docs/github-actions.md#llm-configuration-inputs). |
 | **Output** `version` | The resolved version, without the leading `v`. |
 | **Output** `path` | Absolute path to the installed `ai-rulez` binary. |
 
@@ -471,16 +518,21 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: Goldziher/ai-rulez@v5.2.1   # a release tag from v5.2.0 on carries action.yml; pin the one you reviewed
-        # with:
-        #   version: 5.2.1   # optional; omit (or "latest") to always use the newest release
+      - uses: actions/checkout@v7
+      - uses: Goldziher/ai-rulez@v5
+        with:
+          version: 5.5.3   # pin the CLI independently of the floating action ref
       - run: ai-rulez generate --check   # the committed output matches the sources
       - run: ai-rulez validate --strict  # content and security checks, warnings fail
       - run: ai-rulez lock --check        # pins were updated when the sources were
 ```
 
 </details>
+
+For model-backed reviews, configure `llm-model`, `llm-allow-network: 'true'` and spend limits,
+pass provider credentials through `env:` on the command step or job, and run `ai-rulez judge
+--allow-llm`. Installation itself makes no model requests. See the [action guide](docs/github-actions.md)
+for all inputs, environment precedence, Bedrock, outputs and complete examples.
 
 See [CI usage](docs/lockfile.md#ci-usage) for the lock-check-vs-generate-check distinction and a scheduled
 "outdated sources" report job.

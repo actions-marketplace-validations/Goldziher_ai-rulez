@@ -65,6 +65,34 @@ type validateIn struct {
 	workDirArg
 }
 
+// judgeSkillIn names a rubric skill of a judge call.
+type judgeSkillIn struct {
+	Name           string `json:"name,omitempty" jsonschema:"A skill of the project by name, or the name of an inline skill"`
+	Path           string `json:"path,omitempty" jsonschema:"A directory of the project that holds the skill's SKILL.md"`
+	InlineMarkdown string `json:"inline_markdown,omitempty" jsonschema:"The skill as Markdown text with ## C1 - title criteria sections (needs name)"`
+}
+
+// judgeIn is the input of judge. It takes no model, price, spend cap or provider: those are the user's.
+type judgeIn struct {
+	Paths          []string                  `json:"paths,omitempty" jsonschema:"Files or directories of the project to judge (default: everything the agent harnesses read below the project directory)"`
+	Categories     []string                  `json:"categories,omitempty" jsonschema:"Categories to run: security, quality, governance (default all); the CLI's --categories"`
+	FailOn         []string                  `json:"fail_on,omitempty" jsonschema:"Gate entries such as security:high, governance:high, quality:none, score:70; the CLI's --fail-on"`
+	MinConfidence  string                    `json:"min_confidence,omitempty" jsonschema:"Drop findings below this confidence: low (default), medium, high; the CLI's --min-confidence"`
+	Changed        string                    `json:"changed,omitempty" jsonschema:"Judge only the units that changed since this git revision; HEAD means uncommitted and untracked work (the CLI's bare --changed), origin/main compares with that branch (--changed=origin/main)"`
+	Since          string                    `json:"since,omitempty" jsonschema:"Judge only the units that changed since this git revision, for example origin/main; the CLI's --since"`
+	Impact         *bool                     `json:"impact,omitempty" jsonschema:"With changed, also judge the units a changed rule or instruction file applies to (default true); the CLI's --impact"`
+	AttachRules    *bool                     `json:"attach_rules,omitempty" jsonschema:"Attach the path-scoped rules that govern each unit (default true); the CLI's --attach-rules"`
+	AttachClaudeMD *bool                     `json:"attach_claude_md,omitempty" jsonschema:"Attach the CLAUDE.md and AGENTS.md files that apply to each unit (default true); the CLI's --attach-claude-md"`
+	Skills         []judgeSkillIn            `json:"skills,omitempty" jsonschema:"Rubric skills applied to the governance review; the CLI's --skill"`
+	SkillFor       map[string][]judgeSkillIn `json:"skill_for,omitempty" jsonschema:"Rubric skills per category, for example {\"quality\": [{\"name\": \"style\"}]}; the CLI's --skill-for"`
+	ExplainDrops   bool                      `json:"explain_drops,omitempty" jsonschema:"List every dropped candidate with the reason; the CLI's --explain-drops"`
+	AllowPartial   bool                      `json:"allow_partial,omitempty" jsonschema:"Accept a run in which some unit was only partly reviewed; the CLI's --allow-partial"`
+	Estimate       bool                      `json:"estimate,omitempty" jsonschema:"Send nothing: list the units, what is attached, the models and the cost estimate; the CLI's --estimate"`
+	Redact         bool                      `json:"redact,omitempty" jsonschema:"Mask secret-looking text and send the unit instead of withholding it; the CLI's --redact"`
+	AllowLLM       bool                      `json:"allow_llm,omitempty" jsonschema:"Agree to send the units' content to the user's model provider. The user config must also allow it ([judge] allow_llm = true); the CLI's --allow-llm"`
+	workDirArg
+}
+
 type scanIn struct {
 	ConfigFile  string `json:"config_file,omitempty" jsonschema:"Path to the root configuration file to scan (optional)"`
 	ConfigDir   string `json:"config_dir,omitempty" jsonschema:"Configuration directory name (default: .ai-rulez)"`
@@ -141,6 +169,21 @@ type contentCreateIn struct {
 type skillCreateIn struct {
 	Description string `json:"description,omitempty" jsonschema:"Skill description for the SKILL.md frontmatter, used when content is empty"`
 	contentCreateIn
+	scopedWriteArgs
+}
+
+// scopedWriteArgs are the arguments of the scoped write path of create_skill and
+// update_skill: a skill written into the repository for a harness working in a directory.
+type scopedWriteArgs struct {
+	Scope      string `json:"scope,omitempty" jsonschema:"A project-relative directory (an existing scope): write the skill to <scope>/<harness skills dir>/<name>/SKILL.md, where a harness working there loads it, instead of editing ai-rulez content. Needs allow_write. It is the harness's own file: not generated down, and with ai-rulez.lock present reported as drift until ai-rulez lock runs"`
+	Harness    string `json:"harness,omitempty" jsonschema:"With scope: the enabled preset whose skills directory is written (default: the first enabled preset that has one)"`
+	AllowWrite bool   `json:"allow_write,omitempty" jsonschema:"With scope: agree to write a file into the repository outside the ai-rulez content tree. Required; default false"`
+}
+
+// skillUpdateIn is the input of update_skill.
+type skillUpdateIn struct {
+	contentUpdateIn
+	scopedWriteArgs
 }
 
 type contentUpdateIn struct {
@@ -226,6 +269,19 @@ type installSkillIn struct {
 	Source string `json:"source" jsonschema:"Git URL or local filesystem path"`
 	Path   string `json:"path,omitempty" jsonschema:"Path within repo to skill directory (defaults to skills/<name>)"`
 	Ref    string `json:"ref,omitempty" jsonschema:"Git reference: branch, tag, or commit hash"`
+
+	Include           []string `json:"include,omitempty" jsonschema:"Globs of skill directory names to install from a directory of skills"`
+	Exclude           []string `json:"exclude,omitempty" jsonschema:"Globs of skill directory names to skip; wins over include"`
+	NamePrefix        string   `json:"name_prefix,omitempty" jsonschema:"Prefix added to every installed skill name and output directory"`
+	Trust             string   `json:"trust,omitempty" jsonschema:"Scan level of the installed skills: error (default) or warn"`
+	Resources         []string `json:"resources,omitempty" jsonschema:"File patterns to bundle with each skill; a leading ! removes"`
+	Version           string   `json:"version,omitempty" jsonschema:"Version range of the source's tags, such as ^1.2 (instead of ref)"`
+	TagPrefix         string   `json:"tag_prefix,omitempty" jsonschema:"Only consider tags with this prefix when resolving version"`
+	IncludePrerelease bool     `json:"include_prerelease,omitempty" jsonschema:"Let version match pre-release tags"`
+	MinReleaseAge     string   `json:"min_release_age,omitempty" jsonschema:"Skip tags younger than this, such as 7d"`
+	Domain            string   `json:"domain,omitempty" jsonschema:"Place the skills in this domain"`
+	Profiles          []string `json:"profiles,omitempty" jsonschema:"Restrict the skills to these profiles"`
+	LocalOverride     string   `json:"local_override,omitempty" jsonschema:"Directory used instead of the source while it exists"`
 	overlayArg
 	workDirArg
 }
@@ -286,6 +342,10 @@ type findSkillIn struct {
 	Task  string `json:"task" jsonschema:"What you are about to do, in a sentence"`
 	Limit int    `json:"limit,omitempty" jsonschema:"Maximum results (default 5, max 20)"`
 	Role  string `json:"role,omitempty" jsonschema:"Rank the skills of this role first (default: the server's role)"`
+	// Path and Scope narrow the search in a repository served with discovery.
+	Path      string `json:"path,omitempty" jsonschema:"A project-relative path you are working on: only the skills that apply there are ranked, from its scope and the ancestor scopes, the nearest scope winning a name. Needs repository discovery. Not with scope"`
+	Scope     string `json:"scope,omitempty" jsonschema:"One scope (a directory, '.' for the root): only its skills are ranked. Needs repository discovery. Not with path"`
+	Recursive bool   `json:"recursive,omitempty" jsonschema:"With scope: also the skills of the scopes below it"`
 }
 
 type loadSkillIn struct {

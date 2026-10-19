@@ -1,0 +1,82 @@
+schema = 1
+preset = "junie"
+harness_version = "Junie CLI release 3844.1 (docs built 2026-10-15)"
+verified_on = "2026-10-18"
+completeness = "partial"
+severity = "warning"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://junie.jetbrains.com/docs/slash-commands.html"
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+user_collision = "unknown"
+match = "exact"
+names = [
+  "account",
+  "agent-mode",
+  "branch",
+  "brave",
+  "commands",
+  "compress",
+  "copy",
+  "debug",
+  "demo",
+  "effort",
+  "extensions",
+  "feedback",
+  "goal",
+  "history",
+  "ide",
+  "import",
+  "install-github-action",
+  "link",
+  "local",
+  "logs",
+  "loops",
+  "mcp",
+  "model",
+  "new",
+  "plan",
+  "project-onboarding",
+  "promo",
+  "pull-request",
+  "quit",
+  "remote",
+  "restart",
+  "review",
+  "sandbox",
+  "settings",
+  "skills",
+  "stats",
+  "title",
+  "update",
+  "voice",
+  "worktree",
+]
+aliases = { "compress" = [
+  "compact",
+], "logs" = [
+  "export-logs",
+], "loops" = [
+  "cron-jobs",
+  "crons",
+], "pull-request" = [
+  "pr",
+], "stats" = [
+  "balance",
+  "cost",
+  "credits",
+  "quota",
+  "usage",
+], "title" = [
+  "rename",
+], "voice" = [
+  "mic",
+  "record",
+] }

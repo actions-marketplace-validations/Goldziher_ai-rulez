@@ -1,0 +1,261 @@
+schema = 1
+preset = "hermes"
+harness_version = "docs-only: source tree @ 4b1adbfe5d27 (pyproject version 0.0.0)"
+verified_on = "2026-10-18"
+completeness = "complete"
+severity = "warning"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://github.com/NousResearch/hermes-agent/blob/4b1adbfe5d274c5dbfaa981fcc4dd68391867701/hermes_cli/commands.py"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s2"
+url = "https://github.com/NousResearch/hermes-agent/tree/4b1adbfe5d274c5dbfaa981fcc4dd68391867701/skills"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s3"
+url = "https://github.com/NousResearch/hermes-agent/blob/4b1adbfe5d274c5dbfaa981fcc4dd68391867701/agent/skill_commands.py"
+quote = "# A collision with a core command (name or alias) skips auto-registration; the skill stays"
+verified_on = "2026-10-18"
+
+[[source]]
+id = "s4"
+url = "https://github.com/NousResearch/hermes-agent/blob/4b1adbfe5d274c5dbfaa981fcc4dd68391867701/tools/skills_sync.py"
+quote = "# Never overwrite a same-named user skill."
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+evidence = "s3"
+user_collision = "builtin_wins"
+match = "exact"
+names = [
+  "agents",
+  "approvals",
+  "approve",
+  "autoprune",
+  "battery",
+  "bg",
+  "blueprint",
+  "branch",
+  "browser",
+  "btw",
+  "bundles",
+  "busy",
+  "clear",
+  "codex-runtime",
+  "commands",
+  "compress",
+  "config",
+  "context",
+  "copy",
+  "cron",
+  "curator",
+  "debug",
+  "deny",
+  "diff",
+  "egress",
+  "export",
+  "fast",
+  "focus",
+  "footer",
+  "goal",
+  "handoff",
+  "hatch",
+  "heartbeat",
+  "help",
+  "history",
+  "image",
+  "import",
+  "indicator",
+  "init",
+  "insights",
+  "journey",
+  "kanban",
+  "learn",
+  "login",
+  "loop",
+  "memory",
+  "moa",
+  "model",
+  "new",
+  "palette",
+  "paste",
+  "pause",
+  "personality",
+  "pet",
+  "plan",
+  "platform",
+  "platforms",
+  "plugins",
+  "profile",
+  "prompt",
+  "queue",
+  "quit",
+  "reasoning",
+  "redraw",
+  "refine",
+  "reload",
+  "reload-mcp",
+  "reload-skills",
+  "restart",
+  "resume",
+  "retry",
+  "review",
+  "rollback",
+  "save",
+  "sessions",
+  "sethome",
+  "skills",
+  "skin",
+  "snapshot",
+  "start",
+  "status",
+  "statusbar",
+  "steer",
+  "stop",
+  "subgoal",
+  "subscription",
+  "suggestions",
+  "timestamps",
+  "title",
+  "tools",
+  "toolsets",
+  "topic",
+  "topup",
+  "undo",
+  "update",
+  "usage",
+  "verbose",
+  "version",
+  "voice",
+  "wake",
+  "whoami",
+  "worktree",
+  "yolo",
+]
+aliases = { "agents" = [
+  "tasks",
+], "blueprint" = [
+  "bp",
+], "branch" = [
+  "fork",
+], "codex-runtime" = [
+  "codex_runtime",
+], "compress" = [
+  "compact",
+], "context" = [
+  "ctx",
+], "hatch" = [
+  "generate-pet",
+], "heartbeat" = [
+  "hb",
+], "journey" = [
+  "learning",
+  "memory-graph",
+], "loop" = [
+  "proactive",
+], "new" = [
+  "reset",
+], "platforms" = [
+  "gateway",
+], "prompt" = [
+  "compose",
+], "queue" = [
+  "q",
+], "quit" = [
+  "exit",
+], "reload-mcp" = [
+  "reload_mcp",
+], "reload-skills" = [
+  "reload_skills",
+], "sethome" = [
+  "set-home",
+], "snapshot" = [
+  "snap",
+], "statusbar" = [
+  "sb",
+], "steer" = [
+  "s",
+], "subscription" = [
+  "upgrade",
+], "suggestions" = [
+  "suggest",
+], "timestamps" = [
+  "ts",
+], "version" = [
+  "v",
+] }
+
+[[group]]
+kind = "skill"
+source = "s2"
+evidence = "s4"
+user_collision = "user_wins"
+match = "exact"
+names = [
+  "airtable",
+  "apple-notes",
+  "apple-reminders",
+  "architecture-diagram",
+  "arxiv",
+  "ascii-video",
+  "baoyu-infographic",
+  "blocked-page-recovery",
+  "box",
+  "claude-code",
+  "claude-design",
+  "codebase-inspection",
+  "codex",
+  "competitor-news-monitor",
+  "computer-use",
+  "design-md",
+  "document-to-action-items",
+  "docx",
+  "dogfood",
+  "email-inbox-triage",
+  "findmy",
+  "gif-search",
+  "github",
+  "google-workspace",
+  "grounded-citations",
+  "hermes-agent",
+  "hermes-agent-skill-authoring",
+  "himalaya",
+  "humanizer",
+  "imessage",
+  "inspecting-hermes-desktop-dom",
+  "llm-wiki",
+  "manim-video",
+  "maps",
+  "meeting-action-items",
+  "node-inspect-debugger",
+  "notion",
+  "obsidian",
+  "opencode",
+  "p5js",
+  "pdf",
+  "popular-web-designs",
+  "powerpoint",
+  "product-price-monitor",
+  "python-debugpy",
+  "requesting-code-review",
+  "sdlc-review",
+  "simplify-code",
+  "songsee",
+  "songwriting-and-ai-music",
+  "spike",
+  "systematic-debugging",
+  "teams-meeting-pipeline",
+  "test-driven-development",
+  "weekly-review-planning",
+  "xlsx",
+  "xurl",
+  "youtube-content",
+]

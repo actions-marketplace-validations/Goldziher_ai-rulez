@@ -1,0 +1,44 @@
+schema = 1
+preset = "amp"
+harness_version = "docs-only (ampcode.com/docs, fetched 2026-10-17)"
+verified_on = "2026-10-17"
+completeness = "partial"
+severity = "warning"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://ampcode.com/docs/customize/skills"
+verified_on = "2026-10-17"
+
+[[source]]
+id = "s2"
+url = "https://ampcode.com/docs/customize/plugins"
+verified_on = "2026-10-17"
+
+[[source]]
+id = "s3"
+url = "https://ampcode.com/docs/models-and-subagents"
+verified_on = "2026-10-17"
+
+[[source]]
+id = "s4"
+url = "https://ampcode.com/docs/markdown/customize/skills"
+quote = "Local skills mask repository skills with the same name. A personal skill masks a workspace skill with the same name, and both mask official Amp skills."
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "skill"
+source = "s1"
+evidence = "s4"
+user_collision = "user_wins"
+match = "exact"
+names = ["building-skills"]
+
+[[group]]
+kind = "agent"
+source = "s3"
+user_collision = "unknown"
+match = "exact"
+names = ["low", "medium", "high", "ultra", "Search", "Oracle", "Librarian", "Task", "Read Thread"]

@@ -14,6 +14,7 @@ import (
 	"github.com/Goldziher/ai-rulez/v5/internal/generator/targetmatch"
 	"github.com/Goldziher/ai-rulez/v5/internal/logger"
 	"github.com/Goldziher/ai-rulez/v5/internal/markdown"
+	"github.com/Goldziher/ai-rulez/v5/internal/safefs"
 )
 
 const agentDelegationBuiltin = "agent-delegation"
@@ -204,14 +205,69 @@ func allInlineContext(content *config.ContentTree) []config.ContentFile {
 // the output id derives from — so keying dedup on Name matches the path the two
 // copies compete for.
 func allSkills(content *config.ContentTree) []config.ContentFile {
-	return combineDedupedContentFiles(content.Skills, getAllDomainSkills(content))
+	kept := combineDedupedContentFiles(content.Skills, getAllDomainSkills(content))
+	return withoutShadowedBuiltins(kept, commandOwners(content), skillIDOf)
 }
 
 // allCommands is the command counterpart to allSkills. Commands share the skill
 // output namespace (.claude/skills/{id}/SKILL.md with user-invocable set), so
 // they carry the same last-write-wins hazard and the same fix.
 func allCommands(content *config.ContentTree) []config.ContentFile {
-	return combineDedupedContentFiles(content.Commands, getAllDomainCommands(content))
+	kept := combineDedupedContentFiles(content.Commands, getAllDomainCommands(content))
+	return withoutShadowedBuiltins(kept, skillOwners(content), commandIDOf)
+}
+
+// commandIDOf is the output id of a command: its name, lowercased with spaces
+// and underscores as dashes (sanitizeAgentID).
+func commandIDOf(command config.ContentFile) string {
+	return sanitizeAgentID(command.Name)
+}
+
+func isBuiltinPath(p string) bool {
+	return strings.HasPrefix(p, "builtin://")
+}
+
+// skillOwners and commandOwners map the case-folded output id of every item a
+// project, rather than a builtin pack, supplies to its source path. A skill and
+// a command with one id share .claude/skills/{id}/SKILL.md; a builtin of the
+// other kind yields to such an item (#445). Two project items of different
+// kinds are not resolved here: validation rejects that pair.
+func skillOwners(content *config.ContentTree) map[string]string {
+	return projectOwners(content.Skills, getAllDomainSkills(content), skillIDOf)
+}
+
+func commandOwners(content *config.ContentTree) map[string]string {
+	return projectOwners(content.Commands, getAllDomainCommands(content), commandIDOf)
+}
+
+func projectOwners(root, domains []config.ContentFile, idOf func(config.ContentFile) string) map[string]string {
+	owners := map[string]string{}
+	for _, files := range [][]config.ContentFile{root, domains} {
+		for i := range files {
+			id := strings.ToLower(idOf(files[i]))
+			if _, seen := owners[id]; id == "" || seen || isBuiltinPath(files[i].Path) {
+				continue
+			}
+			owners[id] = files[i].Path
+		}
+	}
+	return owners
+}
+
+// withoutShadowedBuiltins drops the builtin items whose output id a project
+// item of the other kind already owns.
+func withoutShadowedBuiltins(items []config.ContentFile, otherOwners map[string]string, idOf func(config.ContentFile) string) []config.ContentFile {
+	if len(otherOwners) == 0 {
+		return items
+	}
+	kept := make([]config.ContentFile, 0, len(items))
+	for i := range items {
+		if _, shadowed := otherOwners[strings.ToLower(idOf(items[i]))]; shadowed && isBuiltinPath(items[i].Path) {
+			continue
+		}
+		kept = append(kept, items[i])
+	}
+	return kept
 }
 
 // allAgents returns the deduplicated, precedence-ordered agents — root (local)
@@ -567,6 +623,15 @@ func sanitizeAgentID(name string) string {
 	return id
 }
 
+// skillIDOf is the output id of a skill: the one its entry set (a name_prefix
+// applies to the id as well as the name), else the directory holding SKILL.md.
+func skillIDOf(skill config.ContentFile) string {
+	if skill.ID != "" {
+		return skill.ID
+	}
+	return extractSkillID(skill.Path)
+}
+
 // extractSkillID extracts the canonical skill ID from a skill's source path.
 // Source paths take the form `.../skills/{skill-id}/SKILL.md`; the parent
 // directory name is the ID. Used by every preset that emits per-skill files.
@@ -669,21 +734,96 @@ func AllCommands(content *config.ContentTree) []config.ContentFile {
 // it. Shared by the generator and the validate command so the message and
 // precedence stay aligned.
 //
+// A name listed in cfg's lint.allow_overrides (bare, or as domain/name for a
+// copy in that domain) is intentional shadowing and is not reported, matching
+// AR703. cfg may be nil.
+//
 // It also reports an agent whose `extends` target does not exist: it is emitted
 // without inheritance. log is where the warnings go; nil is the CLI's logger.
-func WarnDuplicateContent(log logger.Logger, content *config.ContentTree) {
+func WarnDuplicateContent(log logger.Logger, content *config.ContentTree, cfg *config.Config) {
 	log = logger.Or(log)
 	for _, miss := range unresolvedExtends(content) {
 		log.Warn("Agent extends target not found; emitting agent without inheritance",
 			"agent", miss.Agent,
 			"extends", miss.Extends)
 	}
+	allow := newOverrideAllowance(cfg)
 	for _, warning := range duplicateContentWarnings(content) {
+		dup := warning.Duplicate
+		if allow.covers(dup.Name, append([]string{dup.Winner}, dup.Losers...)) {
+			continue
+		}
 		log.Warn("Duplicate "+warning.Kind+" collapsed",
 			"name", warning.Duplicate.Name,
 			"kept", warning.Duplicate.Winner,
 			"dropped", strings.Join(warning.Duplicate.Losers, ", "))
 	}
+}
+
+// overrideAllowance applies lint.allow_overrides to collapsed duplicates with
+// the same matching AR703 uses: a bare name, or "scope/name" where scope is the
+// domain a copy lives in.
+type overrideAllowance struct {
+	names      map[string]bool
+	sourceDir  string
+	authorRoot string
+}
+
+func newOverrideAllowance(cfg *config.Config) overrideAllowance {
+	a := overrideAllowance{names: map[string]bool{}}
+	if cfg == nil || cfg.Lint == nil {
+		return a
+	}
+	for _, entry := range cfg.Lint.AllowOverrides {
+		a.names[strings.ToLower(strings.TrimSpace(entry))] = true
+	}
+	a.sourceDir, _ = filepath.Abs(cfg.SourceDir())     //nolint:errcheck // falls back to empty
+	a.authorRoot, _ = filepath.Abs(cfg.AuthoredRoot()) //nolint:errcheck // falls back to empty
+	return a
+}
+
+// covers reports whether name, or the scoped name of any of its copies, is listed.
+func (a overrideAllowance) covers(name string, paths []string) bool {
+	name = strings.ToLower(name)
+	if a.names[name] {
+		return true
+	}
+	return CollapseAllowed(a.names, name, paths, a.sourceDir, a.authorRoot)
+}
+
+// CollapseAllowed reports whether allow (lower-cased lint.allow_overrides
+// entries) lists a copy of name as "scope/name". sourceDir is where the scopes
+// are rooted; authored is the project's own content root, which also holds the
+// root AGENTS.md of an "agents" source outside .agents. The bare-name entry is
+// the caller's check.
+func CollapseAllowed(allow map[string]bool, name string, paths []string, sourceDir, authored string) bool {
+	for _, p := range paths {
+		scope := ScopeOf(p, sourceDir)
+		if scope == "import" && filepath.IsAbs(p) && safefs.Within(authored, p) {
+			scope = ""
+		}
+		if scope != "" && allow[scope+"/"+name] {
+			return true
+		}
+	}
+	return false
+}
+
+// ScopeOf names where a copy lives: its domain, "builtin" for an embedded file,
+// "import" for content outside the config directory, "" for root content.
+func ScopeOf(p, configDir string) string {
+	if !filepath.IsAbs(p) {
+		return "builtin"
+	}
+	rel, err := filepath.Rel(configDir, p)
+	if err != nil || safefs.RelEscapes(rel) {
+		return "import"
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) > 2 && parts[0] == "domains" {
+		return parts[1]
+	}
+	return ""
 }
 
 // duplicateContentWarning is one collapsed-duplicate diagnostic. Carried as data
@@ -711,8 +851,8 @@ func duplicateContentWarnings(content *config.ContentTree) []duplicateContentWar
 	}{
 		{"rule", content.Rules, getAllDomainRules(content)},
 		{"context", content.Context, getAllDomainContext(content)},
-		{"skill", content.Skills, getAllDomainSkills(content)},
-		{"command", content.Commands, getAllDomainCommands(content)},
+		{keySkill, content.Skills, getAllDomainSkills(content)},
+		{keyCommand, content.Commands, getAllDomainCommands(content)},
 		{"check", content.Checks, getAllDomainChecks(content)},
 	}
 
@@ -720,6 +860,32 @@ func duplicateContentWarnings(content *config.ContentTree) []duplicateContentWar
 	for _, source := range sources {
 		for _, dup := range FindDuplicateContent(source.root, source.domains) {
 			warnings = append(warnings, duplicateContentWarning{Kind: source.kind, Duplicate: dup})
+		}
+	}
+	return append(warnings, crossKindWarnings(content)...)
+}
+
+// crossKindWarnings reports a builtin skill or command dropped because a project
+// item of the other kind has its output id.
+func crossKindWarnings(content *config.ContentTree) []duplicateContentWarning {
+	var warnings []duplicateContentWarning
+	dropped := []struct {
+		kind   string
+		items  []config.ContentFile
+		owners map[string]string
+		idOf   func(config.ContentFile) string
+	}{
+		{"command", getAllDomainCommands(content), skillOwners(content), commandIDOf},
+		{keySkill, getAllDomainSkills(content), commandOwners(content), skillIDOf},
+	}
+	for _, d := range dropped {
+		for i := range d.items {
+			id := strings.ToLower(d.idOf(d.items[i]))
+			if winner, ok := d.owners[id]; ok && isBuiltinPath(d.items[i].Path) {
+				warnings = append(warnings, duplicateContentWarning{Kind: d.kind, Duplicate: DuplicateContent{
+					Name: d.idOf(d.items[i]), Winner: winner, Losers: []string{d.items[i].Path},
+				}})
+			}
 		}
 	}
 	return warnings

@@ -32,6 +32,14 @@ type toolSpec struct {
 	// readsConfig makes the tool fail like the CLI when the project's
 	// configuration does not load, instead of listing nothing.
 	readsConfig bool
+	// initializes marks a tool that creates a project in the given directory:
+	// it must not walk up to an enclosing project's root.
+	initializes bool
+}
+
+// opensWorld reports whether a tool talks to parties outside the project.
+func opensWorld(a *sdkmcp.ToolAnnotations) bool {
+	return a.OpenWorldHint != nil && *a.OpenWorldHint
 }
 
 // addTool registers a tool through the SDK's typed AddTool: In is the argument
@@ -41,9 +49,11 @@ type toolSpec struct {
 // IsError, so a failure is never reported as success.
 //
 // A read-only server (mcp --read-only) registers only the tools annotated
-// read-only; a tool that writes is skipped.
+// read-only and closed-world; a tool that writes, or that sends content to a
+// third party and spends money (judge), is skipped. So is a tool outside the
+// allow-list of WithTools (surface.go).
 func addTool[In any](s *Server, spec toolSpec, handler handlerFunc) {
-	if s.readOnly && !spec.annotations.ReadOnlyHint {
+	if !s.admitTool(&spec) {
 		return
 	}
 	in, err := inputSchemaFor[In](spec.enums)
@@ -76,6 +86,9 @@ func addTool[In any](s *Server, spec toolSpec, handler handlerFunc) {
 		if takesDir {
 			if err := s.dirs.confine(args); err != nil {
 				return nil, nil, err
+			}
+			if !spec.initializes {
+				useProjectRoot(ctx, args)
 			}
 		}
 		wrapper := handlers.NewToolRequest(req, args)

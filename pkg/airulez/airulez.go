@@ -33,6 +33,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"runtime"
 	"sync"
 	"time"
 
@@ -44,9 +45,9 @@ import (
 	"github.com/Goldziher/ai-rulez/v5/internal/generator"
 	"github.com/Goldziher/ai-rulez/v5/internal/generator/registry"
 	"github.com/Goldziher/ai-rulez/v5/internal/gitutil"
-	"github.com/Goldziher/ai-rulez/v5/internal/includes"
 	"github.com/Goldziher/ai-rulez/v5/internal/lint"
 	"github.com/Goldziher/ai-rulez/v5/internal/logger"
+	"github.com/Goldziher/ai-rulez/v5/internal/pluginresolve"
 	"github.com/Goldziher/ai-rulez/v5/internal/runner"
 	"github.com/Goldziher/ai-rulez/v5/internal/workspace"
 )
@@ -214,9 +215,19 @@ func GitSnapshot(ctx context.Context, repoDir, rev string, r Runner) (Snapshot, 
 func virtualRoot() string {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "/.ai-rulez-virtual/0"
+		return virtualRootFor(runtime.GOOS, "0")
 	}
-	return "/.ai-rulez-virtual/" + hex.EncodeToString(b[:])
+	return virtualRootFor(runtime.GOOS, hex.EncodeToString(b[:]))
+}
+
+func virtualRootFor(host, id string) string {
+	root := "/.ai-rulez-virtual/" + id
+	if host == "windows" {
+		// A volume-less rooted path is not absolute on Windows. This synthetic
+		// volume is only a workspace identifier; it is never opened on disk.
+		return "C:" + root
+	}
+	return root
 }
 
 // Options is what a Project is loaded with. Every field but Workspace is optional.
@@ -361,7 +372,7 @@ func Load(ctx context.Context, o Options) (*Project, error) {
 	}
 	resolvers := config.Resolvers{}
 	if o.Remote {
-		resolvers = includes.Resolvers(o.GitToken, lint.OKFScanner(nil))
+		resolvers = pluginresolve.Resolvers(o.GitToken, lint.OKFScanner(nil))
 	} else {
 		opts = append(opts, config.WithoutRemote())
 	}
@@ -454,7 +465,7 @@ func (p *Project) Validate(ctx context.Context, o ValidateOptions) (*Report, err
 	if err := ctx.Err(); err != nil {
 		return nil, &Error{Code: CodeValidate, Err: err}
 	}
-	lr, err := lint.Run(p.cfg, tree)
+	lr, err := lint.Run(p.cfg, tree, lint.WithContext(ctx), lint.WithHost(ambient.Host{Runner: p.run}))
 	if err != nil {
 		return nil, &Error{Code: CodeValidate, Err: oops.Wrapf(err, "run the strict checks")}
 	}

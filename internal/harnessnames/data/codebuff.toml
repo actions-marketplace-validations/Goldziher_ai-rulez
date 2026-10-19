@@ -1,0 +1,108 @@
+schema = 1
+preset = "codebuff"
+harness_version = "main @ 8d0e7b59e038 (CodebuffAI/codebuff)"
+verified_on = "2026-10-18"
+completeness = "complete"
+severity = "warning"
+invocation_spaces = [["command", "skill"], ["agent"]]
+namespaced = false
+
+[[source]]
+id = "s1"
+url = "https://github.com/CodebuffAI/codebuff/blob/8d0e7b59e038e89d142c799f96ff8c906566c588/cli/src/data/slash-commands.ts"
+verified_on = "2026-10-18"
+
+[[group]]
+kind = "command"
+source = "s1"
+user_collision = "n/a"
+match = "exact"
+names = [
+  "ads:disable",
+  "ads:enable",
+  "agent:gpt-5",
+  "bash",
+  "byok",
+  "copy",
+  "dashboard",
+  "diagnostics",
+  "end-session",
+  "exit",
+  "export",
+  "feedback",
+  "help",
+  "history",
+  "image",
+  "init",
+  "interview",
+  "logout",
+  "mode:default",
+  "mode:lite",
+  "mode:max",
+  "mode:plan",
+  "model",
+  "new",
+  "plan",
+  "queue",
+  "reasoning",
+  "review",
+  "subscribe",
+  "theme:toggle",
+  "todo",
+  "usage",
+]
+aliases = { "bash" = [
+  "!",
+], "byok" = [
+  "provider",
+], "copy" = [
+  "copy-chat",
+], "dashboard" = [
+  "stats",
+  "streak",
+  "usage",
+], "diagnostics" = [
+  "diag",
+  "processes",
+], "exit" = [
+  "q",
+  "quit",
+], "export" = [
+  "export-chat",
+], "help" = [
+  "?",
+  "h",
+], "history" = [
+  "chats",
+], "image" = [
+  "attach",
+  "img",
+], "logout" = [
+  "signout",
+], "mode:default" = [
+  "model:default",
+], "mode:lite" = [
+  "model:lite",
+], "mode:max" = [
+  "model:max",
+], "mode:plan" = [
+  "model:plan",
+], "new" = [
+  "c",
+  "clear",
+  "n",
+  "reset",
+], "queue" = [
+  "queued",
+], "reasoning" = [
+  "effort",
+  "think",
+], "subscribe" = [
+  "buy-credits",
+  "strong",
+  "sub",
+], "todo" = [
+  "todos",
+], "usage" = [
+  "credits",
+] }

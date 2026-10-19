@@ -220,6 +220,7 @@ rewrites them), and the test fails when they are stale.
 | `skill install` | `install_skill` | authoring |  |
 | `skill list` | `list_installed_skills` | authoring |  |
 | `skill remove` | `uninstall_skill` | authoring |  |
+| `judge` | `judge` | authoring |  |
 | `lock --check` | `lock_status` | authoring | yes |
 | `okf validate` | `okf_validate` | authoring | yes |
 | `validate --show-policy` | `policy_show` | authoring | yes |
@@ -252,6 +253,7 @@ rewrites them), and the test fails when they are stale.
 | ------- | -------------------- |
 | `edit agent` | partial field edits and stdin input; update_agent is the whole-item replacement for a tool client |
 | `approve` | approving, revoking, denying and signing are identity-bound human attestations; an agent must not make them |
+| `cache *` | inspects and deletes the index cache the MCP server keeps in the user cache directory; a tool client has no use for the host's disk layout, and deleting is a human decision |
 | `catalog diff` | compares two catalogs through git subprocesses |
 | `edit check` | partial field edits and stdin input; update_check is the whole-item replacement for a tool client |
 | `edit command` | partial field edits and stdin input; update_command is the whole-item replacement for a tool client |
@@ -260,18 +262,20 @@ rewrites them), and the test fails when they are stale.
 | `convert`, `migrate *` | one-shot conversions that read untrusted tool files and rewrite the tree; gated by --write or a preview |
 | `eval *`, `improve *` | run models and harness subprocesses and spend money |
 | `guard` | a hook entry point the harness calls on tool use |
-| `judge` | sends file content to a model with the caller's provider key and spends money; a tool client has no consent prompt |
 | `list` | prints where skills and commands land per harness; generate_outputs dry_run returns the same plan |
 | `llm *` | model credentials and cost estimates for network calls |
 | `local *` | the machine-local overlay is per developer; tools reach it through the local argument of the item tools and update_config |
 | `lock` | writes the lock, the trust anchor of the project, after network pinning and scan acceptance; an agent must not mint trust |
+| `marketplace *` | adds, removes and updates installed marketplaces: network fetches that rewrite the configuration and the lock |
 | `mcp` | starts the MCP server itself |
 | `export okf`, `import okf` | write a whole bundle or import a foreign one into the tree |
+| `plugin *` | installs, removes and updates plugins imported from marketplaces: network fetches, hook and MCP imports that run code |
 | `publish *` | builds and signs distribution artifacts and may push them |
 | `review *`, `rubric *` | spends model tokens in its default mode; the offline heuristics are not exposed yet |
 | `roles show` | a presentation of one role; resolve_role returns what the role keeps |
 | `edit rule` | partial field edits and stdin input; update_rule is the whole-item replacement for a tool client |
 | `scanners *` | run external scanner programs, possibly with egress |
+| `session-start` | a hook entry point the harness calls when a session starts; it runs generate |
 | `sign`, `trust update` | signs with a key, an OIDC identity or a transparency log: credentials and egress |
 | `edit skill` | partial field edits and stdin input; update_skill is the whole-item replacement for a tool client |
 | `telemetry *` | consent and network egress of usage data |
@@ -328,7 +332,8 @@ ai-rulez mcp --serve-skills --read-only          # serve skills and inspect, nev
 | `--targets` | Preset whose rendering is served (its frontmatter dialect and placement rules). Default: the first configured preset that produces skills. |
 | `--domain` | Keep only skills of these domains (repeatable); `root` selects skills owned by no domain. A name that is not a domain of the project is an error at start. |
 | `--allow` / `--deny` | Glob patterns on the skill name. `--allow` keeps only matching skills; `--deny` always wins. |
-| `--read-only` | Register only the read-only authoring tools (validate, scan, doctor, the read/list and report tools). The server can inspect a project but never change it. |
+| `--read-only` | Register only the read-only authoring tools (validate, scan, doctor, the read/list and report tools). The server can inspect a project but never change it. The `judge` tool is not registered either: it sends file content to a model provider and spends money. |
+| `--tools` | Register only these tools (repeatable or comma separated), for example `--tools find_skill,load_skill,find_context,load_context` for a server that can only read skills and context. Applies to `mcp` and to `mcp --serve-skills`. An unknown name is an error that lists the valid tools; a valid name the server would not register anyway (a writing tool under `--read-only`, a context tool without discovery) is simply absent. |
 | `--root` / `--allow-any-dir` | Confine the authoring tools to a directory, as for plain `mcp`. |
 
 The skill set is rendered once at start-up, in memory, by the same code as `generate`, so every
@@ -526,6 +531,8 @@ A project that sets no delivery anywhere serves every skill, as `--serve-skills`
 | `--frozen` | Never use the network and require `ai-rulez.lock` to cover every remote include, installed skill and skill source. |
 | `--offline` | Never use the network; use the lock and the cache when present. |
 | `--include-static` | Also serve skills whose delivery is static. |
+| `--discover-skills[=mode]` | Also serve the skills already in the repository: `repo` (the default when the flag has no value) or `all`; `off` turns a configured discovery off. Write the value with `=`. Either mode also indexes nested instruction files, rules and agents by scope. See [Discovering skills already in the repository](#discovering-skills-already-in-the-repository) and [Monorepos](#monorepos-scopes-and-nested-context). |
+| `--exclude <glob>` | Leave the paths a glob matches out of repository discovery: skill directories and the context index alike. Repeatable; added to `[mcp] exclude`. Needs discovery (`--discover-skills` or `[mcp] discover_skills`). See [Excluding paths](#excluding-paths). |
 | `--max-clone-bytes` | Clone size limit in bytes for git skill sources that set no `max_clone_bytes`. Overrides `AI_RULEZ_MAX_CLONE_BYTES`; 0 (default) defers to it, then to 256 MiB. |
 | `--budget-bytes` | Bytes of skill content a session may read, through `load_skill`, `get_skill`, `read_skill_file` and `resources/read` together. Default 262144 (256 KiB); any negative value removes the cap. |
 | `--usage-log`, `--usage-sink` | Where to record each `load_skill` (see [Usage telemetry](#usage-telemetry)). |
@@ -535,6 +542,349 @@ A project that sets no delivery anywhere serves every skill, as `--serve-skills`
 The serve-mode flags above (and `--profile`, `--targets`, `--domain`, `--allow`, `--deny`) are rejected without
 `--serve-skills`. The authoring tools are registered too, so one process serves both; `--read-only` registers
 only the read-only tools, so a project can be inspected but never changed.
+
+### Settings in the configuration
+
+A project can pin how `mcp` runs in its `[mcp]` table, so every launcher (`.mcp.json`, a plugin, a teammate's
+editor) does not repeat the flags. The keys are accepted in `.ai-rulez/config.toml`, a root `ai-rulez.toml`, the
+`config.<name>.toml` layers and `config.local.toml`; a list in a later layer replaces the earlier one.
+
+```toml
+[mcp]
+serve_skills = true                                               # --serve-skills (a bare `ai-rulez mcp` serves skills)
+read_only = true                                                  # --read-only
+tools     = ["find_skill", "load_skill", "find_context", "load_context"]   # --tools
+allow     = ["review-*"]                                          # --allow (--serve-skills)
+deny      = ["draft-*"]                                           # --deny (--serve-skills)
+daemon    = true                                                  # --daemon (--serve-skills)
+no_watch  = true                                                  # --no-watch (--serve-skills)
+```
+
+- **Skills keys without serving.** `allow`, `deny`, `daemon`, `no_watch`, `exclude` and `discover_skills` only apply
+  when skills are served (`--serve-skills` or `serve_skills = true`). A server started without serving them logs one
+  warning on stderr naming the keys that are set and ignored; the same settings as flags stop the server with
+  `requires --serve-skills`, because a key may be shared by launches that do not serve skills.
+- **A flag wins.** A flag given on the command line replaces the key, including `--read-only=false` and an empty
+  `--tools=`. A flag that is not given leaves the key in charge.
+- **Read at start.** The settings are read when the server starts; change them and restart the server. They are
+  read from the project the server was started in (or the project above it), offline. A project that cannot be read is
+  reported on stderr and the command line decides; a tool name that does not exist stops the server with the list of
+  valid ones.
+- **Policy only tightens.** An [organization policy](policy.md) with `[mcp] read_only = true` makes the server
+  read-only whatever `[mcp] read_only` and `--read-only=false` say; a repository that sets `read_only = false` under
+  it is reported as `AR740` and the server stays read-only.
+- **The surface follows the tools.** The server instructions are written from the tools that are registered, and
+  each authoring prompt (`add-rule`, `author-skill`, `review-config`, `trim-context`) is listed only when every
+  tool it calls is. A read-only server therefore does not tell the model to use the CRUD tools or `generate_outputs`,
+  and offers `review-config` alone.
+
+### Discovering skills already in the repository
+
+A repository often keeps skills that ai-rulez does not define: a `skills/` folder, `.claude/skills` in a package,
+a folder a teammate set up for another harness. `--discover-skills` (or `[mcp] discover_skills`) serves them through
+the same `skill://` resources, `find_skill` and `load_skill`, under the same security scan, session budget and
+`--allow`/`--deny` rules, with no `generate` run and no copy.
+
+```toml
+[mcp]
+discover_skills = "repo"   # "off" (default) | "repo" | "all"
+```
+
+```sh
+ai-rulez mcp --serve-skills --discover-skills        # repo
+ai-rulez mcp --serve-skills --discover-skills=all
+```
+
+| Mode | Serves |
+| ---- | ------ |
+| `off` | Today's behaviour: the skills ai-rulez defines and the skill sources. |
+| `repo` | The above, plus every skill directory found in the working tree. |
+| `all` | `repo`, plus the installed and included skills even when their delivery would keep them out of the served set. |
+
+The flag wins over the configuration; a bare `--discover-skills` means `repo`. A project with no configuration at all
+(or a [lint-only configuration](config-without-folder.md#lint-only-configuration)) can use it; without one it behaves
+as if the `claude` and `codex` presets were configured, so `.claude/skills` and `.agents/skills` are searched.
+
+**Where `repo` looks.** A directory with a `SKILL.md` below one of these roots, at any depth of the project and at
+most six levels below the root:
+
+- `skills/` (not inside a hidden directory such as `.agents/`, which belongs to its own convention);
+- `.claude/skills`;
+- the skill directory of each configured preset (`.agents/skills`, `.cursor/skills`, `.github/skills`, ...), the same
+  list `convert` reads.
+
+A `SKILL.md` inside another skill belongs to that skill and is not a skill of its own. The configuration directory
+(`.ai-rulez/`), `.git/` and `node_modules/` are never searched, symlinks are not followed, and a skill is read with
+the limits of a skill source (2 MiB a file, 8 MiB and 2000 files a skill, 500 skills in all).
+
+**Ignored and generated files.** In a git repository the search covers the files `git ls-files --cached --others
+--exclude-standard` lists, so everything `.gitignore` excludes is skipped. Without git it walks the tree and
+only skips `.git` and `node_modules`. A skill directory ai-rulez itself wrote is left out, so a skill is not served
+twice: one holding a file recorded in the generated manifest, or whose `SKILL.md` still carries the generated
+`Content-Hash` header. While the manifest records a copy it stays out even when edited by hand; without the manifest
+a copy whose body was edited fails the header check and is a repository skill.
+
+**Names.** A skill is served under its frontmatter `name` (the directory name when it has none), and the first
+claimant keeps a name in this order:
+
+1. The skills ai-rulez defines (project, installed and included), then the skill sources: a repository skill with
+   their name is *shadowed*, not served. A **builtin** skill is the exception: it ranks below repository skills, so a
+   repository skill with its name (for example `.claude/skills/testing-conventions` beside `builtins = ["testing"]`)
+   replaces it, as a skill under `.ai-rulez/skills/` does. The start-up log names the builtin that was replaced.
+2. Repository skills, shallowest directory first, then by path. A later one with a name already taken is served
+   under its path from the project root, `/` turned into `.` and the leading dot of each segment dropped:
+   `pkg/.claude/skills/bar` becomes `pkg.claude.skills.bar` (its frontmatter `name` is rewritten to match).
+   If that name is taken too, it is shadowed. Each rename is a start-up warning naming both directories and the served
+   name, and is listed under `skill_discovery.renamed` (`name`, `served_as`, `path`, `kept_by`).
+
+Every shadowed skill is a start-up warning and is listed, with its path and what shadows it, under
+`skill_discovery.shadowed` in the `ai-rulez://catalog` resource, next to the served ones (`skill_discovery.served`)
+and the count of generated directories left out (`generated_skipped`).
+
+**Limits.** A discovered skill takes the default trust of a skill authored in the project (the scan blocks error
+findings, warns on the rest). With `[lock] enforce`, it must be pinned like any served skill: set
+`discover_skills` in the configuration, not only the flag, so `ai-rulez lock` sees it. The served catalog is not
+cached while discovery is on, and live reload watches the skill roots found at start (and `skills/`, `.claude/skills`
+and the preset directories at the project root when they exist): a new skill folder in an existing root is picked
+up, a new `.claude/skills` elsewhere needs a restart.
+
+**Without a configuration.** `--discover-skills` works in a directory with no `.ai-rulez/` or `ai-rulez.toml`. The
+server then has no configuration to manage, so it registers only the tools that work without one (`find_skill`,
+`load_skill`, `list_skill_resources`, `search_skills`, `get_skill`, `read_skill_file`, `find_context`,
+`load_context`, `get_version`, `list_builtins`, `show_builtin`, `policy_show`, `okf_validate` and `init_project`)
+and no authoring prompt. `ai-rulez://config` and the `ai-rulez://{kind}/{name}` item resources are not listed;
+`ai-rulez://catalog` is, and is built from what was discovered: the served skills as `items`, the `scopes` with the
+instruction files, rules and agents found, and the `skill_discovery` report.
+
+### Monorepos: scopes and nested context
+
+A harness loads a nested `AGENTS.md`, `CLAUDE.md`, `.claude/` or `.agents/` tree only once it works inside that
+directory. A planner at the repository root never sees it. With discovery on (`--discover-skills` or
+`[mcp] discover_skills = "repo" | "all"`), the server indexes the repository by **scope** and answers "what applies to
+this path?" the way a harness would. With discovery off none of this exists: no extra tool, resource or instruction.
+
+**Scopes.** A scope is a directory that holds `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.claude/`, `.agents/`,
+`.codex/`, `.cursor/rules`, `.github/copilot-instructions.md` or a `skills/` directory with a skill in it. The project
+root is the scope `.`. Scopes are inferred from the tree; nothing is configured. Each item in a scope has a `kind`
+(`skill`, `instruction`, `rule`, `agent`, `command`), a `source` (`claude`, `agents`, `codex`, `cursor`, `copilot`,
+`gemini`, `skills-dir`), a `name`, a `description` (the frontmatter `description`, else the first heading) and a content
+`hash`. The index keeps summaries only, never a file body.
+
+Instruction files, rules, agents and commands are indexed wherever a known convention keeps them (`.claude/`,
+`.agents/`, `.cursor/`, `.github/`, ...): the files present decide, not the `presets` list, so a configuration with
+`presets = []` (lint-only), `["claude"]` or no configuration at all serves the same context. Only the skill
+directories follow the presets, as in [Where `repo` looks](#discovering-skills-already-in-the-repository).
+
+**What applies to a path.** The scopes that are the path or one of its ancestors, nearest first. A skill, agent or
+command is shadowed by one of the same name in a nearer scope, as harnesses shadow by name; instruction files and rules
+add up, so none of them is shadowed. A skill name that two scopes share is served under its path from the project root
+(`pkg/api/.claude/skills/lint` becomes `pkg.api.claude.skills.lint`), as in
+[Discovering skills](#discovering-skills-already-in-the-repository).
+
+**`find_skill` with `path` or `scope`.**
+
+```json
+{"task": "lint the code", "path": "pkg/api/handler.go"}
+```
+
+```json
+{"task": "lint the code", "path": "pkg/api/handler.go",
+ "scopes": ["pkg/api", "."],
+ "results": [{"name": "pkg.api.claude.skills.lint", "scope": "pkg/api", "score": 1.4, "description": "Lint the api package"}]}
+```
+
+The root's own `lint` is shadowed for that path; for `pkg/web/index.ts` it is the one returned. `scope` lists one exact
+scope, `"."` being the root; `recursive: true` adds the scopes below it. `path` and `scope` are mutually exclusive, and
+`recursive` needs `scope`. A skill that ai-rulez defines or fetches belongs to no scope and applies everywhere. Each
+result of a discovered skill names its `scope`. Without `path` and `scope` the call behaves as before.
+
+**`find_context` and `load_context`.** Nested instruction files, rules and agents are served beside the skills.
+`find_context` takes the same `path`, `scope` and `recursive`, plus an optional `task` to rank by name, scope, kind and
+description (an item with no matching word is left out), `kind` (`instruction`, `rule` or `agent`) and `limit` (default
+10, max 50). It returns summaries:
+
+```json
+{"path": "pkg/api/handler.go"}
+```
+
+```json
+{"count": 4, "total": 4, "scopes": ["pkg/api", "."],
+ "results": [
+  {"name": "reviewer", "kind": "agent", "scope": "pkg/api", "source": "claude",
+   "description": "Reviews changes to the api", "uri": "context://pkg/api/reviewer", "hash": "sha256:..."},
+  {"name": "AGENTS.md", "kind": "instruction", "scope": "pkg/api", "source": "agents",
+   "description": "API conventions", "uri": "context://pkg/api/AGENTS.md", "hash": "sha256:..."},
+  {"name": "AGENTS.md", "kind": "instruction", "scope": ".", "source": "agents",
+   "description": "Root conventions", "uri": "context://./AGENTS.md", "hash": "sha256:..."},
+  {"name": "style", "kind": "rule", "scope": ".", "source": "claude",
+   "description": "Code style for the whole repository", "uri": "context://./style", "hash": "sha256:..."}]}
+```
+
+**Rules with `paths`.** A rule can name the files it applies to. With `path`, `find_context` returns such a rule only
+when the path matches one of its globs: `paths:` in the frontmatter of a Claude Code rule, and `globs:` of a Cursor
+`.mdc` rule that is not `alwaysApply`. The globs are relative to the scope directory, the one that holds `.claude`
+(or `.cursor`), as in `ai-rulez validate`: `pkg/api/.claude/rules/handlers.md` with `paths: "handlers/**"` applies to
+`pkg/api/handlers/user.go`, not to `pkg/api/other/handlers/user.go`. `paths` globs are anchored at that directory
+(`*.py` is a file directly in it, `**/*.py` any depth); Cursor `globs` also match a bare pattern such as `*.tsx` at any
+depth. A rule without either applies everywhere in its scope, and instruction files and agents are never narrowed. A
+`scope` query (no `path`) lists every rule of the scope whatever its globs. A rule's result carries its `paths` or
+`globs`, so you can see what narrows it. Pass a file as `path`: a directory matches no glob.
+
+`load_context` reads one, by `scope` and `name` or by `uri`, with an optional `budget_bytes`:
+
+```json
+{"scope": "pkg/api", "name": "AGENTS.md"}
+```
+
+It returns the text read **from the repository when you call**, never from the index, with the `hash` of what it read
+(and `changed_since_index: true` when the file changed since start-up). The same text is the resource
+`context://<scope>/<name>` (`context://./AGENTS.md` for the root), a resource template that `resources/list` does not
+enumerate: find items with `find_context`. Commands are indexed and counted but not served as context.
+
+The context tools apply what skills do: the `--allow` and `--deny` patterns match an item's name or `scope/name`
+(`--deny AGENTS.md` hides every `AGENTS.md`; a non-empty `--allow` is an allowlist for context too); the security
+scan runs when the index is built, so a file with an error finding is withheld (not listed, not loadable) and is a
+start-up warning, and again on the content read at load time. The finding names the item by its `context://` URI and
+line, for example `AR005 risky-shell-exec at context://./CLAUDE.md:2` (`skill://` stays for skills); the scan level
+(`trust`) is a skill setting and does not change what happens to a file of context, since an error finding withholds it
+and the lesser findings are logged while the file is served; reads count against the session budget (`--budget-bytes`), which `load_context`, `load_skill`,
+`get_skill`, `read_skill_file` and `resources/read` share. A symlink is never followed and a generated copy is skipped.
+Domains, roles, the lock and approvals apply to skills only.
+
+**The `scopes` section of the catalog.** `ai-rulez://catalog` gains a `scopes` array: each scope with its per-kind
+counts and sources, so a planner sees the shape of the repository in one read. The same query parameters narrow it:
+`ai-rulez://catalog?path=pkg/api/handler.go`, `ai-rulez://catalog?scope=pkg/api` or
+`ai-rulez://catalog?scope=.&recursive=true`.
+
+```json
+"scopes": [
+  {"scope": ".", "sources": ["agents", "claude"], "counts": {"skill": 1, "instruction": 1, "rule": 1}},
+  {"scope": "pkg/api", "sources": ["agents", "claude"], "counts": {"skill": 2, "instruction": 1, "agent": 1}}
+]
+```
+
+The `skill_discovery.index` object of the same document reports `items`, `limit`, `found` and `truncated`.
+
+**Server instructions.** The first eight scopes by depth are named in the server instructions with their counts
+(`pkg/api (2 skills, 1 instruction, 1 agent)`), then "and M more", so a planner knows the nested content exists
+without a call.
+
+**Limits.** The index holds at most 20000 items. Past that it keeps the shallowest scopes and the server warns at
+start-up; `skill_discovery.index.truncated` says so. Only files git lists (tracked, or untracked and not ignored; a
+plain walk without git) are indexed, and an instruction file, rule or agent file over 1 MiB is skipped. `path`, `scope`
+and `uri` are untrusted input: they must be relative to the project, free of backslashes and control characters, and
+must not climb out with `..`; they select entries of the index and are never opened as paths. The index is built when the
+server starts and rebuilt when the catalog reloads; the [file watcher](#live-refresh-of-the-index) picks a new
+scope or instruction file up while the server runs, and `load_context` always shows the current text of a file the
+index already knows.
+
+#### The index cache
+
+A cold build of the index is dominated by the security scan of every item. The index cache keeps what a start
+computed so the next one does not: the summary of each indexed file (name, description and content hash, keyed by
+path, size and modification time) and the scan verdict of content the scan found **nothing** in (keyed by a hash of
+the scan level and of the names and content hashes of the scanned files). It never stores a file body.
+
+- **Location.** `<user cache>/ai-rulez/monorepo-index/<repo-id>/index.json`, where `<repo-id>` is a hash of the
+  canonical project root, so nothing is written into the repository. If the user cache is not writable the cache
+  falls back to `.ai-rulez/.cache/monorepo-index/` (`.ai-rulez-cache/monorepo-index/` in the root layout), which is
+  listed in `.git/info/exclude` so the working tree stays clean. `[mcp] index_cache = "user" | "repo" | "off"`
+  chooses; `user` is the default and keeps the fallback, `repo` always uses the project directory, `off` keeps
+  nothing. `ai-rulez cache status` and `ai-rulez doctor` report which location is in use, its size and its problems;
+  `ai-rulez cache clear` drops it.
+- **Freshness.** A file summary is used while its size and modification time are unchanged, the git tree state
+  (`HEAD^{tree}`) is the one it was recorded in, and the file was not modified in the two seconds before the save
+  (a file written in the same timestamp tick may have changed again). A new tree drops the summaries and keeps the
+  verdicts, which are keyed by content. A verdict is dropped when the build of ai-rulez or the `[lint]` settings
+  change.
+- **Safety.** The index file is written with mode `0600` through write-and-rename, under a lock file so several
+  servers on one repository share it and merge their entries. It carries an HMAC-SHA256 with a per-user secret kept
+  outside the cache (`~/.config/ai-rulez/index-cache.key`, like the catalog cache's): a file that was edited,
+  truncated, planted or written by another version fails its check and is discarded and rebuilt. A cache entry is
+  a hint, never a decision: `--allow` and `--deny` run on every build, a verdict is only used for the exact bytes and
+  trust level it was recorded for (a skill with any finding, even a warning, is scanned every time), and
+  `load_context` scans the body it reads again on every call.
+- **Cost.** `docs/performance.md` has the measured numbers; on the benchmark monorepo (1500 items over 500 scopes) a
+  warm start takes about a tenth of a cold one.
+
+#### Excluding paths
+
+`--exclude <glob>` (repeatable) and `exclude = [...]` under `[mcp]` in `.ai-rulez/config.toml` (or the root
+`ai-rulez.toml`) leave paths out of discovery:
+
+```toml
+[mcp]
+discover_skills = "repo"
+exclude = ["third_party/**", "**/fixtures/"]
+```
+
+```bash
+ai-rulez mcp --serve-skills --discover-skills --exclude 'examples/**' --exclude '**/testdata/'
+```
+
+Globs are relative to the project root with slashes: `**` crosses directories, `*` and `?` stay within one, `{a,b}`
+alternates, a pattern without a slash (`AGENTS.md`, `legacy`) matches at any depth, and a pattern naming a directory
+(`third_party`, `third_party/`, `third_party/**`) excludes everything below it. A glob that leaves the project
+(`../x`) or is empty is rejected. The flag's globs are added to the configuration's; neither replaces the other.
+
+An excluded file is dropped from the file listing before anything is read, so it costs no parsing, scan or cache
+entry. The globs apply to the skill directories and to the whole context index: `CLAUDE.md`, `AGENTS.md`,
+`GEMINI.md`, Copilot instructions, rules, agents and commands. An excluded directory marks no scope. The file watcher
+does not follow excluded paths either, so a change below one does not refresh the index. `--exclude` without
+discovery is an error, as it would silently do nothing; the configuration key is ignored while discovery is off.
+
+#### Live refresh of the index
+
+While `--serve-skills --discover-skills` runs, a debounced file watcher (fsnotify, 300 ms) follows the project tree.
+When an instruction file (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `copilot-instructions.md`), a `SKILL.md`, anything
+under `.claude`, `.agents`, `.codex`, `.cursor`, `.github` or `skills`, or a directory appears, changes or goes, the
+server rebuilds its catalog. The rebuild re-reads only the files whose size or modification time changed and scans
+only content without a clean verdict, so it is incremental in cost. When the index changed the server re-registers
+the `ai-rulez://index` resource with a new generation, which makes the SDK send one `resources/list_changed`; a client
+then calls `find_context` or `find_skill` again. Reading `ai-rulez://index` returns the generation, the item and
+scope counts and the cache report. `.git`, `node_modules`, `vendor`, `target`, `dist`, `build` and the configuration
+directory (which the poll below covers) are not watched, a skipped change costs nothing, and `--no-watch` turns the
+watcher off with the rest of live reload. If the operating system's limit on watched directories is reached the
+server warns and the index refreshes on the poll interval only. The server instructions, written at start-up, are not
+rewritten.
+
+#### Writing a skill into a scope
+
+`create_skill` and `update_skill` take `scope` (a project-relative directory), `allow_write` and, optionally,
+`harness`. With `scope` the skill is written to `<scope>/<harness skills dir>/<name>/SKILL.md`, for example
+`pkg/api/.claude/skills/lint/SKILL.md`, where a harness working in `pkg/api` loads it:
+
+```json
+{"scope": "pkg/api", "name": "lint", "description": "Lint the api package", "allow_write": true}
+```
+
+```json
+{"success": true, "operation": "create_skill", "path": "pkg/api/.claude/skills/lint/SKILL.md", "name": "lint",
+ "scope": "pkg/api", "harness": "claude", "message": "Skill written to ...", "lock": "ai-rulez.lock exists: ..."}
+```
+
+Rules, all checked before anything is created:
+
+- `allow_write: true` is required on the call (default false), like `allow_llm` for `judge`.
+- The scope must be an existing directory of the project (every scope the index knows is one). Neither it, nor any
+  directory on the way to the skill, nor the skill directory or file may be a symlink; a path that leaves the
+  project (`..`, an absolute path, a backslash) is refused; the write itself goes through an `os.Root` of the
+  project, so a link planted after the checks cannot lead out.
+- Only the skills directory of a preset the configuration enables is written: `harness` names it, else the first
+  enabled preset that keeps skills in a directory (`claude` is `.claude/skills`, `codex` is `.agents/skills`).
+- A generated copy is refused: a file listed in the generated manifest (for a skill, any file of its directory) or
+  carrying a `Content-Hash` header that verifies. Edit the source under `.ai-rulez/` instead.
+- The content is scanned as `install_skill` scans a skill, at the strictest trust level, and any finding refuses the
+  call. With no `content`, `create_skill` builds a SKILL.md from `description`.
+- `create_skill` refuses an existing skill; `update_skill` refuses a missing one. The file is written with mode
+  `0644` through a temporary file and a rename, and calls on one server are serialized.
+- A scoped write edits the harness file directly: it is not ai-rulez content and is not generated down. With an
+  `ai-rulez.lock` present the result carries `lock`, because the new file is reported as drift until
+  `ai-rulez lock` records it.
+
+`scope` cannot be combined with `domain`, `priority`, `targets` or `local`. Instruction files and rules stay read-only
+over MCP. The tools are annotated as writing and non-idempotent (`update_skill` replaces a file), so a read-only
+server (`--read-only`) does not register them.
 
 ### Start-up cost and the catalog cache
 
@@ -637,9 +987,11 @@ ai-rulez mcp --serve-skills --daemon             # the sessions that share one c
 
 | Tool | Arguments | Result |
 | ---- | --------- | ------ |
-| `find_skill` | `task` (required), `limit` (default 5, max 20), `role` | Ranked matches: name, description, score, domain, digest. With a role, `in_role` and the role's skills first. |
+| `find_skill` | `task` (required), `limit` (default 5, max 20), `role`, `path`, `scope`, `recursive` | Ranked matches: name, description, score, domain, digest. With a role, `in_role` and the role's skills first. With discovery, `path` or `scope` keeps the skills that apply there (see [Monorepos](#monorepos-scopes-and-nested-context)). |
 | `load_skill` | `name` (required), `path`, `budget_bytes` | The file (`SKILL.md` by default), `provenance`, `digest`, an index of the skill's other files with their `mode`, and `files_access` (where the files live and how to use them) when the skill has any. |
 | `list_skill_resources` | `name` (required), `offset` | Every file of the skill with path, URI, size, MIME type, digest, `mode`, `executable` and an `interpreter` hint, without loading them. |
+| `find_context` | `task`, `path`, `scope`, `recursive`, `kind`, `limit` | With discovery only. Summaries of the nested instruction files, rules and agents that apply to a path or scope: name, kind, scope, source, description, `context://` URI, hash. |
+| `load_context` | `scope` and `name`, or `uri`; `budget_bytes` | With discovery only. The text of one of them, read from the repository now, with its hash. |
 
 `search_skills`, `get_skill` and `read_skill_file`, the `skill://` resources, `skills/list` and `skills/get` keep
 working as described above. All tools are annotated read-only.
@@ -1002,6 +1354,10 @@ started in. A call without `working_directory` uses that directory; a relative o
 followed before the check. Start the server with `mcp --root <dir>` to confine it elsewhere, or with
 `mcp --allow-any-dir` to lift the check. The skills-serving mode takes no directory argument.
 
+**Project root.** Like the CLI, every tool except `init_project` walks up from `working_directory` to the nearest
+directory that holds a configuration in any layout, stopping at the git root and never above the home directory. A
+call that passes `config_file` or `config_dir` is not walked up.
+
 **Capabilities.** The authoring server advertises `tools`, `prompts` and `resources`, none with `listChanged` (their
 sets are fixed), pages lists at 100 entries, and sends the SDK's warnings and errors to stderr. Its lists carry a
 cache hint (`ttlMs` five minutes, `public`); resource reads are never cacheable, since the project can change between
@@ -1082,7 +1438,8 @@ returned as warnings in a success result.
 
 Initialize a new ai-rulez project in the current directory with the layout `ai-rulez init` creates:
 `.ai-rulez/config.toml` plus the `rules/`, `context/`, `skills/`, `agents/` and `domains/` directories. It refuses
-to overwrite an existing configuration.
+to overwrite an existing configuration. It initializes exactly the given directory and does not walk up, but refuses
+when a directory above it in the same repository already holds a configuration (the message names that file).
 
 **Parameters:**
 
@@ -1365,14 +1722,18 @@ Create a new skill file (AI prompt/expert definition).
 - `priority` (optional, string): Priority level
 - `targets` (optional, array): Target providers
 - `local` (optional, boolean): Create in `.ai-rulez/local/` (gitignored)
+- `description` (optional, string): Frontmatter description, used when `content` is empty
+- `scope` (optional, string): Write the skill into the repository at `<scope>/<harness skills dir>/<name>/SKILL.md` instead of editing ai-rulez content; needs `allow_write`
+- `harness` (optional, string): With `scope`, the enabled preset whose skills directory is written
+- `allow_write` (optional, boolean, default false): With `scope`, agree to write a harness file into the repository
 
-**Response:** Similar to create_rule
+**Response:** Similar to create_rule. With `scope` it carries `path` (project-relative), `scope`, `harness` and, when `ai-rulez.lock` exists, `lock`. See [Writing a skill into a scope](#writing-a-skill-into-a-scope).
 
 #### `update_skill`
 
 Update an existing skill file.
 
-**Parameters:** Same as create_skill, with content as required
+**Parameters:** Same as create_skill, with content as required (`scope`, `harness` and `allow_write` replace the harness's skill file)
 
 **Response:** Similar to create_rule
 
@@ -1512,7 +1873,17 @@ Install a named skill from a git repository or local path.
 - `source` (required, string): Git URL or local filesystem path
 - `path` (optional, string): Path within repo to skill directory (defaults to `skills/<name>`)
 - `ref` (optional, string): Git reference (branch, tag, commit)
+- `include`, `exclude` (optional, string arrays): Globs of skill directory names to install, or skip, from a directory of skills; `exclude` wins
+- `name_prefix` (optional, string): Prefix added to every installed skill name and output directory
+- `trust` (optional, string): Scan level of the installed skills, `error` (default) or `warn`
+- `resources` (optional, string array): File patterns to bundle with each skill; a leading `!` removes
+- `version` (optional, string): Version range of the source's tags, such as `^1.2`, instead of `ref`
+- `tag_prefix` (optional, string), `include_prerelease` (optional, boolean), `min_release_age` (optional, string): tag filter and release age gate for `version`
+- `domain` (optional, string), `profiles` (optional, string array): Scope the skills to a domain or to profiles
+- `local_override` (optional, string): Directory used instead of the source while it exists
 - `local` (optional, boolean): Record the skill in the `config.local.*` overlay instead of the shared config
+
+The arguments are the `installed_skills` fields of the same names, and `skill install` has a flag for each.
 
 A `source` URL that carries a credential in its userinfo (`https://user:token@host/...`) is refused, like the CLI: it
 would be written in clear into `config.toml`. Use the git credential helper or the `AI_RULEZ_GIT_TOKEN` environment
@@ -1749,7 +2120,8 @@ document in `structuredContent`.
 | URI | Content |
 | --- | ------- |
 | `ai-rulez://config` | The parsed settings (`read_config`) |
-| `ai-rulez://catalog` | The content catalog (`catalog`) |
+| `ai-rulez://catalog` | The content catalog (`catalog`); with `--serve-skills --discover-skills` also `skill_discovery` and a `scopes` section, narrowed by `?path=`, `?scope=` and `&recursive=true` (see [Monorepos](#monorepos-scopes-and-nested-context)) |
+| `context://{scope}/{name}` | With discovery: one nested instruction file, rule or agent, read from the repository on each read |
 | `ai-rulez://{kind}/{name}` | The markdown of one root item; `kind` is `rules`, `context`, `skills`, `checks`, `agents` or `commands` |
 | `ai-rulez://domains/{domain}/{kind}/{name}` | The same for an item of a domain |
 

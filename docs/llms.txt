@@ -1,6 +1,6 @@
 # AI-Rulez
 
-> The standards-compliant lifecycle tool for agent knowledge and capabilities: author, generate, bundle, validate, govern, publish
+> Author, generate, validate and govern AI agent rules, skills, plugins and MCP configuration across 52 coding assistants. Review with verified model evidence, evaluate skills, lock and sign dependencies, and publish bundles. CLI, MCP server and Go API.
 
 ## Docs
 
@@ -24,7 +24,9 @@
 - [Roles](https://goldziher.github.io/ai-rulez/roles/): A profile picks domains for a project.
 - [Includes](https://goldziher.github.io/ai-rulez/includes/): Reuse configurations across multiple projects through inheritance and composition.
 - [Installed Skills](https://goldziher.github.io/ai-rulez/installed-skills/): Install named skills from external repositories.
+- [Installed Plugins](https://goldziher.github.io/ai-rulez/installed-plugins/): If a harness can install a plugin or a marketplace, ai-rulez can import it, use it and lock it.
 - [.agents as a Source](https://goldziher.github.io/ai-rulez/agents-source/): ai-rulez reads its content from the .ai-rulez tree by default.
+- [Config without a .ai-rulez folder](https://goldziher.github.io/ai-rulez/config-without-folder/): Keep the whole ai-rulez configuration in one file, ai-rulez.toml at the project root, and no .ai-rulez/ directory.
 - [Local Configuration](https://goldziher.github.io/ai-rulez/local-overrides/): Personal, machine-local configuration that is never committed.
 - [Catalog](https://goldziher.github.io/ai-rulez/catalog/): ai-rulez catalog describes everything a repository defines: rules, context, skills, agents, commands and checks, with owner, version, size, the digest ai-rulez.lock pins, the roles that keep each...
 - [Monorepo](https://goldziher.github.io/ai-rulez/monorepo/): For large projects with multiple teams, organize your .ai-rulez/ configuration using domains and profiles to provide relevant context while avoiding overwhelming AI assistants with irrelevant...
@@ -34,8 +36,10 @@
 
 - [Supported Harnesses](https://goldziher.github.io/ai-rulez/harnesses/): ai-rulez ships 52 built-in presets, one per AI coding harness.
 - [AGENTS.md and .agents/skills](https://goldziher.github.io/ai-rulez/agents-md/): AGENTS.md and .agents/skills/ are the closest thing to a cross-tool convention for project instructions and Agent Skills.
+- [Managing Only Remote Skills](https://goldziher.github.io/ai-rulez/managing-remote-skills/): Use this when you write CLAUDE.md, AGENTS.md and your own skills by hand and want ai-rulez to manage the configured components: skills installed from a remote repository, plugins, MCP servers...
 - [llms.txt](https://goldziher.github.io/ai-rulez/llms-txt/): llms.txt is a markdown file at the root of a site or repository that tells language models what is there and where to read it.
 - [Hooks and Permissions](https://goldziher.github.io/ai-rulez/settings/): ai-rulez generate can write the lifecycle hooks, permission rules and a few other settings keys of a project into each harness's native settings file, without shipping a plugin.
+- [Run Generate in Remote Sessions](https://goldziher.github.io/ai-rulez/session-start/): A remote (cloud) agent session starts from a fresh clone.
 - [Permissions](https://goldziher.github.io/ai-rulez/permissions/): The top-level \[permissions\] block is one allow/ask/deny list for every harness that has a native permission surface.
 - [User-level Configuration](https://goldziher.github.io/ai-rulez/user-scope/): ai-rulez generate writes inside the project.
 - [Custom Presets](https://goldziher.github.io/ai-rulez/profiles/): Set presets in .ai-rulez/config.toml to control which tools ai-rulez generates for.
@@ -52,6 +56,7 @@
 
 ## Validate
 
+- [GitHub Actions](https://goldziher.github.io/ai-rulez/github-actions/): The official action is Goldziher/ai-rulez at the repository root.
 - [Strict Validation](https://goldziher.github.io/ai-rulez/strict-validation/): ai-rulez validate checks that configuration parses and matches the schema.
 - [Verifiers](https://goldziher.github.io/ai-rulez/verifiers/): \[\[verifiers\]\] declares deterministic, read-only checks over the repository, run by ai-rulez verifiers run.
 - [Poly Hooks](https://goldziher.github.io/ai-rulez/poly-hooks/): AI-Rulez publishes a reusable Poly hook catalog in poly-hooks.toml.
@@ -75,7 +80,7 @@
 - [Improve (experimental)](https://goldziher.github.io/ai-rulez/improve/): ai-rulez improve run \<skill\> --with CMD runs an external optimizer (a tool that rewrites a skill against a benchmark) on a throwaway copy of the skill and accepts a candidate only if a held-out...
 - [Skill Search](https://goldziher.github.io/ai-rulez/search/): ai-rulez search ranks the skills your project serves against a query, with the same ranker as the findskill tool of mcp --serve-skills, and measures that ranking against labeled queries.
 - [Review](https://goldziher.github.io/ai-rulez/review/): ai-rulez review scores skills, agents and commands against a rubric you own.
-- [Judge](https://goldziher.github.io/ai-rulez/judge/): ai-rulez judge grades agent instruction files with a language model, from the command line alone.
+- [Judge](https://goldziher.github.io/ai-rulez/judge/): ai-rulez judge reviews agent configuration with language models: skills (with their scripts and references), agents, slash commands, rules, CLAUDE.md and AGENTS.md files, MCP and settings files.
 - [LLM Access](https://goldziher.github.io/ai-rulez/llm/): internal/llm.Client is the one Go interface for reaching a language model, so the provider, the cost controls and the privacy rules live in one place.
 - [Performance](https://goldziher.github.io/ai-rulez/performance/): How ai-rulez is benchmarked, how a regression is caught, and what the optimization passes changed.
 

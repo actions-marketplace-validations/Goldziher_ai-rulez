@@ -56,7 +56,7 @@ func (g *XumPresetGenerator) Generate(content *config.ContentTree, baseDir strin
 	skillList := allSkills(content)
 	for idx := range skillList {
 		skill := skillList[idx]
-		skillID := extractSkillID(skill.Path)
+		skillID := skillIDOf(skill)
 		skillDir := filepath.Join(baseDir, ".xum", "skills", skillID)
 		outputs = append(outputs,
 			config.OutputFile{Path: skillDir, IsDir: true},
@@ -285,7 +285,7 @@ func xumMCPEntry(cfg *config.Config, server *config.MCPServer) interface{} {
 		if server.IsEnabled() {
 			return command
 		}
-		return map[string]interface{}{"transport": config.TransportStdio, "command": command, keyDisabled: true}
+		return map[string]interface{}{"transport": config.TransportStdio, keyCommand: command, keyDisabled: true}
 	}
 }
 

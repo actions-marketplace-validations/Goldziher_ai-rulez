@@ -68,7 +68,7 @@ var analyzerGroups = []analyzerGroup{
 	// Project-level security: supply chain, permissions, scanner egress and
 	// the trust rule of the user-only [llm] and [telemetry] keys.
 	{AnalyzerSecurity, ScopeBundle, []string{
-		"AR010", "AR506", "AR9E0", "AR9E1", "AR9E2", "AR9E3", "AR9E4", "AR9E5", "AR9E6", "AR9E7", "AR9K1", "AR9L1",
+		"AR010", "AR039", "AR040", "AR506", "AR9E0", "AR9E1", "AR9E2", "AR9E3", "AR9E4", "AR9E5", "AR9E6", "AR9E7", "AR9K1", "AR9L1",
 	}},
 	{AnalyzerReferences, ScopeFile, []string{"AR201", "AR202", "AR301", "AR401", "AR402"}},
 	{AnalyzerReferences, ScopeItem, []string{"AR101", "AR210", "AR302", "AR303", "AR304", "AR305", "AR306", "AR403"}},
@@ -77,7 +77,7 @@ var analyzerGroups = []analyzerGroup{
 	{AnalyzerMCP, ScopeBundle, []string{"AR601"}},
 	{AnalyzerMCP, ScopeItem, []string{"AR602"}},
 	{AnalyzerDuplicates, ScopeBundle, []string{"AR701", "AR702", "AR703"}},
-	{AnalyzerDescriptions, ScopeItem, []string{"AR801", "AR802", "AR803", "AR804", "AR805", "AR806", "AR807"}},
+	{AnalyzerDescriptions, ScopeItem, []string{"AR801", "AR802", "AR803", "AR804", "AR805", "AR806", "AR807", "AR808"}},
 	{AnalyzerBudgets, ScopeItem, []string{"AR901", "AR902"}},
 	{AnalyzerMetadata, ScopeItem, []string{"AR951", "AR952", "AR953", "AR954"}},
 	{AnalyzerPlugin, ScopeBundle, []string{"AR961", "AR9T0", "AR9T1"}},
@@ -90,6 +90,8 @@ var analyzerGroups = []analyzerGroup{
 	{AnalyzerOKF, ScopeItem, []string{"AR9B0", "AR9B1", "AR9B2", "AR9B3", "AR9B4", "AR9B5", "AR9B6", "AR9B7", "AR9B8", "AR9B9"}},
 	{AnalyzerLLMsTxt, ScopeItem, []string{"AR9P0", "AR9P1", "AR9P2", "AR9P3", "AR9P4", "AR9P5", "AR9P6"}},
 	{AnalyzerTraps, ScopeFile, []string{"AR9C0", "AR9C1", "AR9C2", "AR9C3", "AR9C4", "AR9C5", "AR9C6", "AR9C7", "AR9C8", "AR9C9", "AR9CA"}},
+	// Items named like a built-in or reserved name of a harness (internal/harnessnames).
+	{AnalyzerTraps, ScopeItem, []string{"AR9U0", "AR9U1"}},
 	// Invalid [telemetry] and [llm] tables.
 	{AnalyzerConfig, ScopeBundle, []string{"AR9K0", "AR9L0", "AR9G8"}},
 	// Review dimensions: reported by `ai-rulez review`, never by validate.
