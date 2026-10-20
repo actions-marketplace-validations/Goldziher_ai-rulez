@@ -14512,7 +14512,10 @@ A preset member is replaced by an entry with the same name or the same `profile`
 less egress than the profile: `AR9E0`), severity map, flag deny-list, `batch_size`, `message_properties` and `version` range; keys set on
 the entry win. A profile can also name `required_flags`: a flag of its command (`--no-llm` for `skillspector`) that
 an egress = false entry must keep when it writes its own `command`, because dropping it switches on a network feature
-(`AR9E0`).
+(`AR9E0`). A profile can also list the results its scanner reports only because a lookup was unreachable: with
+`egress = false` the `skillspector` profile drops SkillSpector's `SC4` "OSV.dev unreachable" notice, one per
+`requirements*.txt`, and keeps real `SC4` vulnerability findings. SkillSpector has no offline switch, so it still
+attempts that lookup, sending the package names, unless the network is blocked around it.
 `ai-rulez scanners list` shows the preset of each scanner.
 
 ##### Long messages
@@ -30108,7 +30111,7 @@ complete, 2 a gate or verification failed. Codes `AR9N0`-`AR9N9`. See [Publish](
 
 ##### `ai-rulez scan`
 
-Security checks only, the `AR0xx` family of [strict validation](strict-validation.md#security-checks): secrets, hidden characters, prompt-injection phrases, risky shell, unrestricted `allowed-tools`, outbound hosts, unpinned remotes. Offline and deterministic. `scan` runs only the `security` analyzer, so hook and config findings (`AR504`, `AR9K0`, ...) belong to `validate`. Flags: `--recursive`, `--format text|json|sarif|github|junit|markdown`, `--output`, `--fail-on`, `--lint-profile`, `--external`, `--allow-egress`, `--baseline`, `--update-baseline`, `--baseline-reason`, `--strict-baseline`, `--changed`, `--since`, `--since-depth`, `--since-max-files`, `--repo-root`, `--no-local`, `--config-dir`. The baseline and changed-only flags mean the same as on [`validate`](#validation-command) (without needing `--strict`). Exit `0` clean, `1` cannot run, `2` findings at or above `--fail-on`.
+Security checks only, the `AR0xx` family of [strict validation](strict-validation.md#security-checks): secrets, hidden characters, prompt-injection phrases (also obfuscated), risky shell, unrestricted `allowed-tools`, outbound hosts, unpinned remotes, anti-refusal and context-exfiltration prose, persistence, unsafe deserialization, internal endpoints, malware-shaped content (web shells, miners, reverse shells, offensive tools, phishing forms), shipped executables, dependency manifests and MCP metadata. Offline and deterministic. `scan` runs only the `security` analyzer, so hook and config findings (`AR504`, `AR9K0`, ...) belong to `validate`. Flags: `--recursive`, `--format text|json|sarif|github|junit|markdown`, `--output`, `--fail-on`, `--lint-profile`, `--external`, `--allow-egress`, `--baseline`, `--update-baseline`, `--baseline-reason`, `--strict-baseline`, `--changed`, `--since`, `--since-depth`, `--since-max-files`, `--repo-root`, `--no-local`, `--config-dir`. The baseline and changed-only flags mean the same as on [`validate`](#validation-command) (without needing `--strict`). Exit `0` clean, `1` cannot run, `2` findings at or above `--fail-on`.
 
 With `--external`, the scanners of `[[lint.external]]` also run (see [External scanners](strict-validation.md#staged-input-severity-and-baseline)). Scanner flags, also on `validate`:
 
