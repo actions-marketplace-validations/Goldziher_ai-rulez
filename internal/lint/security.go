@@ -410,13 +410,34 @@ func (r *runner) injectionRes() []gatedRe {
 	return r.injRes
 }
 
-func (r *runner) scanInjection(abs string, no int, line string) {
+// injectionIn returns the first injection phrase the line holds, "" when none.
+func (r *runner) injectionIn(line string) string {
 	for _, re := range r.injectionRes() {
 		if m := re.FindString(line); m != "" {
-			r.add(CodeInjectionPhrase, abs, no, "text reads like an attempt to override instructions: %q", m)
-			return
+			return m
 		}
 	}
+	return ""
+}
+
+func (r *runner) scanInjection(abs string, no int, line string) {
+	if m := r.injectionIn(line); m != "" {
+		r.add(CodeInjectionPhrase, abs, no, "text reads like an attempt to override instructions: %q", m)
+	}
+}
+
+// commentSuspicious reports whether the body of an HTML comment carries
+// imperative, agent-addressed or injection-style text.
+func (r *runner) commentSuspicious(body string) bool {
+	if imperativeRe().MatchString(body) || commentAddressesAgent(body) {
+		return true
+	}
+	for _, re := range r.injectionRes() {
+		if re.MatchString(body) {
+			return true
+		}
+	}
+	return false
 }
 
 // scanComments reports HTML comments that carry instruction-like text; such a
@@ -428,13 +449,7 @@ func (r *runner) scanComments(abs, raw string) {
 		if strings.Contains(body, "ai-rulez-lint-ignore") {
 			continue
 		}
-		suspicious := imperativeRe().MatchString(body) || commentAddressesAgent(body)
-		for _, re := range r.injectionRes() {
-			if re.MatchString(body) {
-				suspicious = true
-			}
-		}
-		if suspicious {
+		if r.commentSuspicious(body) {
 			line += strings.Count(raw[from:m[0]], "\n")
 			from = m[0]
 			r.add(CodeCommentInstruction, abs, line, "HTML comment contains instruction-like text the reader will not see")
@@ -448,6 +463,10 @@ var (
 	// sign) do not count: they say nothing about the command.
 	governingNegRe = sync.OnceValue(func() *regexp.Regexp {
 		return regexp.MustCompile(`(?i)\b(?:never|don'?t|do\s+not|must\s+not|should\s+not|shouldn'?t|cannot|can'?t|avoid|instead\s+of|rather\s+than|forbidden|prohibit\w*|disallow\w*|refuse\w*|reject\w*|banned|ban)\b|❌|⛔|🚫`)
+	})
+	// doubleNegWordRe is a verb that cancels the negation before it.
+	doubleNegWordRe = sync.OnceValue(func() *regexp.Regexp {
+		return regexp.MustCompile(`(?i)^(?:forget|forgetting|hesitate|fail|neglect|omit)$`)
 	})
 	// imperativeMarkerRe is a word that turns the span into something to do.
 	imperativeMarkerRe = sync.OnceValue(func() *regexp.Regexp {
@@ -496,6 +515,10 @@ func negatedVerbOnly(clause string) bool {
 	}
 	between := strings.Fields(clause[locs[len(locs)-1][1]:])
 	if len(between) > negLeadWords {
+		return false
+	}
+	// "never forget to send", "do not hesitate to send": a double negation is an instruction.
+	if len(between) > 0 && doubleNegWordRe().MatchString(between[0]) {
 		return false
 	}
 	for i, w := range between {
@@ -560,13 +583,24 @@ func (r *runner) scanShell(abs string, no int, line string, prose bool) {
 	}
 	r.scanCredentialAccess(abs, no, line)
 	if strings.Contains(line, ">") || strings.Contains(line, "tee") { // what writeOutsideRe starts from
-		if m := writeOutsideRe().FindString(line); m != "" {
+		if m := writeOutsideNonPersistence(line); m != "" {
 			r.add(CodeShellAccess, abs, no, "writes outside the project (%s...)", strings.TrimSpace(m))
 		}
 	}
 	if strings.Contains(line, "chmod") && chmod777Re().MatchString(line) {
 		r.add(CodeShellAccess, abs, no, "makes files world-writable (chmod 777)")
 	}
+}
+
+// writeOutsideNonPersistence returns the first write outside the project whose own command
+// segment is not a persistence write, which AR043 reports instead.
+func writeOutsideNonPersistence(line string) string {
+	for _, seg := range pipeSegSplitRe().Split(line, -1) {
+		if m := writeOutsideRe().FindString(seg); m != "" && !writesPersistence(seg) {
+			return m
+		}
+	}
+	return ""
 }
 
 func (r *runner) scanHosts(abs string, no int, line string) {

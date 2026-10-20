@@ -55,6 +55,9 @@ type mcpServer struct {
 	line int
 	// section is the JSON key that holds the servers ("" for config.toml).
 	section string
+	// meta is the free text the definition carries for the model: its
+	// description and the metadata of the tools it lists.
+	meta []mcpMeta
 }
 
 // mcpJSONFiles are the hand-authored MCP files checked when tracked or present:
@@ -75,6 +78,7 @@ func (r *runner) mcpServers() []*mcpServer {
 				file: cfgPath, name: s.Name, transport: writtenTransport(s),
 				command: s.Command, args: s.Args, url: s.URL, env: s.Env, headers: s.Headers,
 				oauth: s.HasOAuth(), oauthClientID: mcpOAuthClientID(s.OAuth), disabled: !s.IsEnabled(),
+				meta: configMCPMeta(s),
 			})
 		}
 	}
@@ -130,6 +134,8 @@ func (r *runner) configMCPServer(name string) *config.MCPServer {
 // sameMCPServer reports whether a server read from a JSON file carries the same
 // launch definition as the config.toml server of that name, so the file is a
 // generated copy. Any difference means the file was edited and is checked itself.
+// Generation writes no description, so a file without metadata matches; metadata
+// the file carries must equal the config's.
 func sameMCPServer(j *mcpServer, gen *config.MCPServer) bool {
 	g := &mcpServer{
 		transport: writtenTransport(gen), command: gen.Command, url: gen.URL,
@@ -138,7 +144,8 @@ func sameMCPServer(j *mcpServer, gen *config.MCPServer) bool {
 	return len(j.typeProblems) == 0 && j.command == gen.Command && j.url == gen.URL &&
 		effectiveTransport(j) == effectiveTransport(g) &&
 		j.oauth == g.oauth && j.oauthClientID == g.oauthClientID &&
-		slices.Equal(j.args, gen.Args) && maps.Equal(j.env, gen.Env) && maps.Equal(j.headers, gen.Headers)
+		slices.Equal(j.args, gen.Args) && maps.Equal(j.env, gen.Env) && maps.Equal(j.headers, gen.Headers) &&
+		(len(j.meta) == 0 || slices.Equal(j.meta, configMCPMeta(gen)))
 }
 
 // isGeneratedSelfServer reports whether srv is the ai-rulez self server that
@@ -217,6 +224,7 @@ func decodeMCPJSON(file, key string, data []byte) []*mcpServer { //nolint:gocycl
 				}
 			}
 		}
+		s.meta = jsonMCPMeta(f)
 		if raw, ok := f["oauth"]; ok {
 			s.oauth = true
 			s.oauthClientID = oauthClientIDFromJSON(raw)
@@ -319,6 +327,7 @@ func (r *runner) checkMCPServers(servers []*mcpServer) {
 		r.checkMCPConflicts(s, at, byNameAcrossFiles[strings.ToLower(s.name)])
 		r.checkMCPPins(s, at)
 		r.checkMCPSecrets(s, lines, at)
+		r.checkMCPMetadata(s, lines, at)
 	}
 }
 

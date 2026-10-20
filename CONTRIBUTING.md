@@ -138,16 +138,17 @@ ai-rulez is MIT licensed. A rule, pattern or test derived from a project under a
 [NVIDIA SkillSpector](https://github.com/NVIDIA/SkillSpector) (Apache-2.0), must keep that license's conditions:
 
 1. **Keep the upstream header and mark the change.** Retain the original copyright and SPDX lines, and state that the
-   file was modified (Apache-2.0 section 4(b)). Record the upstream repository, path and commit in the header:
+   file was modified (Apache-2.0 section 4(b)). Record the upstream repository, the repository-relative path of each
+   upstream file (`src/skillspector/nodes/analyzers/static_patterns_ssrf.py`, not `static_patterns_ssrf.py`) and the
+   commit in the header:
 
    ```go
+   // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
    // SPDX-License-Identifier: Apache-2.0
-   // Copyright 2026 NVIDIA CORPORATION & AFFILIATES
    //
-   // Derived from https://github.com/NVIDIA/SkillSpector/blob/<commit>/<path>
-   // at commit <full-commit-sha>.
-   // Modified by the ai-rulez contributors: <one line on what changed>.
-   // The modifications are licensed under the MIT License; see LICENSE.
+   // Derived from NVIDIA/SkillSpector at commit <full-commit-sha> (<upstream files>).
+   // Modified by the ai-rulez authors: <what changed>.
+   // See THIRD_PARTY_NOTICES.md.
    ```
 
    Use the comment syntax of the file (`#` for TOML or YAML, `<!-- -->` for Markdown). Copy the copyright line from the
@@ -156,12 +157,25 @@ ai-rulez is MIT licensed. A rule, pattern or test derived from a project under a
 2. **Add a notices entry.** List the file, upstream path and commit under its project in
    [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Keep the full text of each upstream license under `LICENSES/`
    (`LICENSES/Apache-2.0.txt` for Apache-2.0), copied unmodified from the official source; add it with the first file
-   derived under that license.
+   derived under that license. Embedded data files (word lists, Unicode tables) need an entry too. Every file in
+   `LICENSES/` ships in the release archives and the npm, PyPI and Homebrew packages.
 
 3. **Do not copy YARA rules from signature-base.** SkillSpector's YARA files are based on
    [Neo23x0/signature-base](https://github.com/Neo23x0/signature-base) (DRL-1.1). Re-derive such a pattern as an RE2
    regular expression instead of copying the file, and credit the original rule name, its author and reference, and the
    DRL-1.1 license in the header and in `THIRD_PARTY_NOTICES.md`.
+
+4. **Reuse upstream patterns only as RE2, and check them.** Upstream regular expressions and fixtures may be reused
+   where they are valid RE2, provided the file carries the header from item 1; otherwise write the pattern yourself. A
+   file that only takes the idea and shares no pattern or fixture needs no header. Start from negative fixtures, and do
+   not carry over an upstream heuristic without checking it against a real corpus for false positives.
+
+5. **Transcode tests with the script.** `scripts/transcode-skillspector-tests.py` turns SkillSpector pattern tests into
+   candidate `ruleCase` rows (`--rule` selects rule ids, `--map SSID=ARNNN` maps them to ai-rulez codes). The output is
+   a fragment that starts with the header: merge it into the target file and keep a single copy of the header. `--tests`
+   must be the `tests` directory of a SkillSpector git checkout, or pass the full 40-character commit with `--upstream`;
+   the script exits with an error rather than stamp an unknown commit. Review every generated row. Its tests are in `scripts/test_transcode_skillspector_tests.py` and
+   run with `python3 -m unittest discover -s scripts -p 'test_transcode_skillspector_tests.py'`.
 
 Contributions that go the other way, from ai-rulez to an upstream project, follow that project's terms; SkillSpector
 requires a DCO sign-off (`git commit -s`). This does not apply to commits in this repository.
