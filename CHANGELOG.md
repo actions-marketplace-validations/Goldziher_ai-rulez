@@ -6,6 +6,55 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
+## [5.6.2] - 2026-10-21
+
+### Added
+
+- **`[[lint.accept]]`: accept one finding with a required reason.** An entry names a `rule`, a `path` glob and a
+  `match` substring of the finding's message (or a `line`, or both), plus a `reason` that config validation requires.
+  The matching findings stay in the report, marked accepted with the reason, and do not fail the run; a second finding
+  of the same rule in the file stays reported. An entry that accepted nothing is reported as the new `AR9I0
+  accept-unused` warning, except when the run could not have produced the finding (rule off, analyzer not selected,
+  or the file not linted by `--path`/`--glob`), so stale acceptances do not accumulate. A code the organization policy
+  protects is never accepted (`AR740`). `validate --update-baseline` does not write accepted findings to the baseline.
+  (#479)
+- **`validate --tracked-only` and `[lint] tracked_only = true`.** `validate` and `scan` lint every file that is not
+  git-ignored, tracked or not, so an untracked build artifact such as a `__pycache__/*.pyc` (AR051) made results differ
+  between machines. With the option the run reports no findings in files outside the git index, except the files
+  `--changed` or `--since` names; the files are still walked and their findings are dropped after the run. Outside a
+  git work tree it logs a warning and keeps every finding. (#476)
+
+### Fixed
+
+- **The scanner flags no longer fail a run without `--external`.** `validate` and `scan` rejected `--no-scan-cache`,
+  `--write-baseline`, `--reason`, `--show-suppressed` and `--scanner-baseline` with "require --external", so a CI
+  command had to branch on whether a scanner was configured. Without `--external` these flags now do nothing and one
+  warning on stderr names the ones that were ignored; `--reason`, `--reason-for`, `--min-severity` and `--rule` still
+  need `--write-baseline`, and `--write-baseline` still needs `--reason`. (#477)
+- **`validate` reports a malformed skill frontmatter once.** A skill whose frontmatter is not valid YAML (for example
+  `description: Args: a, b`) printed a `WARN Ignoring malformed YAML frontmatter` line on stderr in addition to the
+  `AR306` finding, which broke machine-readable output. The lint pass now leaves the warning out, since `AR306` carries
+  it; commands that do not validate, such as `list`, still warn. (#478)
+- **`validate --update-baseline` no longer records findings in untracked files.** A teammate's or CI's checkout does
+  not have those files, so their baseline entries were dead weight and `lint-baseline.json` differed between machines.
+  They are now skipped, and the run logs how many. (#476)
+- **A scanner result without `locations` is no longer reported on `.ai-rulez/config.toml:1`.** The finding looked as
+  if it were about the configuration, and a baseline entry on that file stopped matching once the scanner added a
+  location. A run that was handed exactly one skill (`batch_size = 1`) now attributes such a result to that skill's
+  `SKILL.md`; any other run reports it without a file, with `(no location reported by scanner)` at the end of the
+  message. Cached scanner results from earlier versions are scanned again. (#474)
+- **A finding without a file no longer takes the working directory as its path.** Such a scanner result got the path
+  `.` (or the name of the directory `validate` ran in), so `--tracked-only` dropped it, its fingerprint depended on where
+  the command ran, and SARIF, GitHub and JUnit output named `.` as its location. It now has an empty path, a fingerprint
+  that is the same from every directory, and no location in the output formats.
+- **`[[lint.accept]]` and the baseline no longer interfere.** `--update-baseline` copied config-accepted findings into
+  `lint-baseline.json` (and refused security ones without `--baseline-reason`), and applying a baseline replaced their
+  reason and counted them twice. The baseline now leaves them alone.
+- **`validate --external` shows progress during a long scanner run.** A scanner with `batch_size = 1` over hundreds of
+  skills ran for minutes without a line of output, so CI and agent shells could not tell it from a hang. Each scanner
+  now prints `name: N batches to run` on stderr when it starts (every scanner, `1 batch to run` for a single run) and,
+  only when it runs two or more batches, `name: batch 4/13` as each finishes, also with `parallel`. The lines are information level: `--quiet` drops them and the report on stdout is unchanged. (#475)
+
 ## [5.6.1] - 2026-10-20
 
 ### Changed

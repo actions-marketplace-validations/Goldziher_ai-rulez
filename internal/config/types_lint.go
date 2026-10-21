@@ -13,6 +13,24 @@ type LintIgnoreRule struct {
 	Reason string `yaml:"reason,omitempty" json:"reason,omitempty" toml:"reason,omitempty"`
 }
 
+// LintAccept accepts the findings of one rule in one file whose message holds
+// Match (or that sit on Line), with a required reason: a hand-written,
+// reviewable alternative to a generated baseline entry.
+type LintAccept struct {
+	// Rule is one finding code (AR007) or name (tool-breadth); no wildcards.
+	Rule string `yaml:"rule" json:"rule" toml:"rule"`
+	// Path is a glob, relative to the config directory or the repository
+	// root, of the source file; an exact path is a glob without wildcards.
+	Path string `yaml:"path" json:"path" toml:"path"`
+	// Match is a substring the finding's message must contain. Set Match,
+	// Line or both; an entry with neither would accept the whole file.
+	Match string `yaml:"match,omitempty" json:"match,omitempty" toml:"match,omitempty"`
+	// Line is the 1-based line the finding must be reported on.
+	Line int `yaml:"line,omitempty" json:"line,omitempty" toml:"line,omitempty"`
+	// Reason says why the finding is acceptable; it is required.
+	Reason string `yaml:"reason" json:"reason" toml:"reason"`
+}
+
 // LintConfig configures `ai-rulez validate`. Every field is optional;
 // the lint package applies defaults for anything left unset.
 type LintConfig struct {
@@ -32,9 +50,21 @@ type LintConfig struct {
 	// IgnorePaths lists globs, relative to the config directory, of source
 	// files whose findings are dropped.
 	IgnorePaths []string `yaml:"ignore_paths,omitempty" json:"ignore_paths,omitempty" toml:"ignore_paths,omitempty"` //nolint:tagliatelle
+	// TrackedOnly reports no findings in git-untracked files, so the result does
+	// not depend on what a local run left behind (a __pycache__, a build
+	// artifact). The files are still walked and linted; their findings are
+	// dropped after the run. `validate --tracked-only` sets it for one
+	// invocation; files named by --changed are kept, and outside a git work tree
+	// it is ignored with a warning.
+	TrackedOnly bool `yaml:"tracked_only,omitempty" json:"tracked_only,omitempty" toml:"tracked_only,omitempty"` //nolint:tagliatelle
 	// IgnoreRules drops findings of the listed rules in the listed files only:
 	// `[[lint.ignore_rules]] rules = ["AR901", "AR9*"] paths = ["playground/**"]`.
 	IgnoreRules []LintIgnoreRule `yaml:"ignore_rules,omitempty" json:"ignore_rules,omitempty" toml:"ignore_rules,omitempty"` //nolint:tagliatelle
+	// Accept accepts single findings with a reason:
+	// `[[lint.accept]] rule = "AR007" path = ".claude/skills/foo/SKILL.md" match = "Bash" reason = "..."`.
+	// Accepted findings stay in the report, marked accepted, and do not fail
+	// the run; an entry that matches nothing is reported (AR9I0).
+	Accept []LintAccept `yaml:"accept,omitempty" json:"accept,omitempty" toml:"accept,omitempty"`
 	// SkillRoots lists globs, relative to the project root, of the directories
 	// that hold skill directories (".claude/skills", "plugins/*/skills") a
 	// harness loads from. AR808 checks a hand-written skill or command only in

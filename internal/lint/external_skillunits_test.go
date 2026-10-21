@@ -2,6 +2,7 @@ package lint
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -359,6 +360,92 @@ func TestChangedRunReportsTheSameFindingsAsAFullRun(t *testing.T) {
 			assert.Equal(t, findingFiles(want), findingFiles(narrow))
 		})
 	}
+}
+
+// A result without a location belongs to the one skill a single-skill run scanned; with
+// several skills in the run it belongs to none, and says so instead of naming the config file (#474).
+func TestLocationlessResultAttribution(t *testing.T) {
+	tests := []struct {
+		name     string
+		keys     string
+		skills   []string
+		wantFile []string
+		wantNote bool
+	}{
+		{"batch_size 1 names the skill", "batch_size = 1\n", []string{"alpha", "beta"},
+			[]string{".ai-rulez/skills/alpha/SKILL.md", ".ai-rulez/skills/beta/SKILL.md"}, false},
+		{"one skill in the run names the skill", "", []string{"alpha"}, []string{".ai-rulez/skills/alpha/SKILL.md"}, false},
+		{"several skills in a run name no file", "", []string{"alpha", "beta"}, []string{""}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			p := fakeProject(t, isolationNone, fakeScannerCommand(t, "--only-global", "{skill_dirs}")+"inputs = [\"skills\"]\n"+tt.keys, tt.skills...)
+
+			// Act
+			first := scannerFindings(p.run(Options{}))
+			second := scannerFindings(p.run(Options{}))
+
+			// Assert
+			assert.Equal(t, tt.wantFile, findingFiles(first))
+			for _, f := range first {
+				assert.Equal(t, tt.wantNote, strings.Contains(f.Message, "(no location reported by scanner)"), f.Message)
+				assert.NotContains(t, f.File, "config.toml")
+			}
+			require.Len(t, second, len(first))
+			assert.Equal(t, first[0].Fingerprint(), second[0].Fingerprint(), "the baseline identity is stable across runs")
+		})
+	}
+}
+
+// Each scanner announces how many runs it has; each finished run logs its place once, in order, even
+// when runs overlap (#475).
+func TestScannerProgressLines(t *testing.T) {
+	tests := []struct {
+		name string
+		keys string
+	}{
+		{"serial", "batch_size = 1\n"},
+		{"parallel", "batch_size = 1\nparallel = 3\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			p, _ := skillUnitProject(t, tt.keys, "s1", "s2", "s3", "s4", "s5")
+			rec := &testutil.LogRecorder{}
+
+			// Act
+			p.runWith(Options{}, WithHost(ambient.Host{Log: rec}))
+
+			// Assert
+			var progress []string
+			for _, l := range rec.Lines() {
+				if strings.HasPrefix(l, "INFO fake: ") {
+					progress = append(progress, strings.TrimPrefix(l, "INFO "))
+				}
+			}
+			assert.Equal(t, []string{
+				"fake: 5 batches to run", "fake: batch 1/5", "fake: batch 2/5", "fake: batch 3/5", "fake: batch 4/5", "fake: batch 5/5",
+			}, progress)
+		})
+	}
+}
+
+// A scanner that runs once says so, and a dry run prints no progress (#475).
+func TestScannerProgressForSingleRunAndDryRun(t *testing.T) {
+	// Arrange
+	p, _ := skillUnitProject(t, "", "s1", "s2")
+	rec := &testutil.LogRecorder{}
+
+	// Act
+	p.runWith(Options{}, WithHost(ambient.Host{Log: rec}))
+	dry := &testutil.LogRecorder{}
+	p.runWith(Options{Scanner: ScannerOptions{DryRun: true, Out: io.Discard}}, WithHost(ambient.Host{Log: dry}))
+
+	// Assert
+	assert.Contains(t, rec.Lines(), "INFO fake: 1 batch to run")
+	assert.NotContains(t, strings.Join(rec.Lines(), "\n"), "fake: batch")
+	assert.NotContains(t, strings.Join(dry.Lines(), "\n"), "to run")
 }
 
 // The "served from the cache" log counts the skills read from the cache, not the

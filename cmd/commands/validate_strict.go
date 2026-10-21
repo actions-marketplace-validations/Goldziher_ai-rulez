@@ -86,7 +86,11 @@ func checkStrictFlags() error {
 	if err := checkFlagValues(); err != nil {
 		return err
 	}
-	return checkFlagCombinations()
+	if err := checkFlagCombinations(); err != nil {
+		return err
+	}
+	warnIgnoredScannerFlags()
+	return nil
 }
 
 // checkFlagValues rejects unknown names and values.
@@ -291,6 +295,9 @@ func strictLint(ctx context.Context, cfg *config.Config) (*lint.Report, error) {
 	}, append(opts, lint.WithContext(ctx))...)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // already contextual
+	}
+	if err := applyTrackedOnly(ctx, cfg, tree, report); err != nil {
+		return nil, err
 	}
 	if validateMCPUserScope {
 		report.Findings = append(report.Findings, mcpUserScopeFindings(cfg)...)

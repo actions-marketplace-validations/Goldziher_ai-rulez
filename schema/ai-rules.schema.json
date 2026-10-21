@@ -2609,6 +2609,10 @@
           "items": { "type": "string" },
           "description": "Globs, relative to the config directory, of source files whose findings are dropped."
         },
+        "tracked_only": {
+          "type": "boolean",
+          "description": "Report no findings in files that are not tracked in the repository index, so results do not depend on untracked files a local run left behind (a __pycache__, a build artifact). The files are still read; findings in them are dropped after the run. Files named by --changed are kept; outside a repository work tree it is ignored with a warning. validate --tracked-only sets it for one run."
+        },
         "ignore_rules": {
           "type": "array",
           "description": "Rule-scoped ignores: findings of the listed rules in the listed files are dropped, every other finding in those files is kept.",
@@ -2630,6 +2634,35 @@
                 "description": "Globs, relative to the config directory or the repository root, of the source files the ignore covers."
               },
               "reason": { "type": "string", "description": "Why the findings are acceptable; for the reader." }
+            }
+          }
+        },
+        "accept": {
+          "type": "array",
+          "description": "Accepts single findings with a required reason: the findings of one rule in one file whose message holds match (or that sit on line) stay in the report, marked accepted, and do not fail the run. An entry that matches nothing is reported as AR9I0.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rule", "path", "reason"],
+            "properties": {
+              "rule": {
+                "type": "string",
+                "description": "One finding code (AR007) or name (tool-breadth); no wildcards."
+              },
+              "path": {
+                "type": "string",
+                "description": "Glob, relative to the config directory or the repository root, of the source file; an exact path is a glob without wildcards."
+              },
+              "match": {
+                "type": "string",
+                "description": "Substring the finding's message must contain (case-sensitive). Set match, line or both."
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "The 1-based line the finding must be reported on."
+              },
+              "reason": { "type": "string", "minLength": 1, "description": "Why the finding is acceptable; required." }
             }
           }
         },
