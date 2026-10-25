@@ -6,6 +6,43 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
+## [5.6.3] - 2026-10-24
+
+### Added
+
+- **`recursive_exclude` and `generate --recursive --exclude`.** `generate --recursive` (and `validate --recursive`)
+  searched every directory, so a repository with deliberately invalid configurations in test fixtures failed the whole
+  run. `testdata` directories are no longer searched, and `recursive_exclude = ["tests/fixtures"]` in the
+  configuration of the directory the run starts from (`.ai-rulez/config.toml`, `.agents/ai-rulez.toml` or
+  `.config/ai-rulez/config.toml`), or `--exclude` (repeatable), names more. The `generate_outputs` MCP tool honours
+  both (`recursive` with `exclude`).
+
+### Fixed
+
+- **The live-reload watcher no longer scales its descriptors with the repository.** `mcp --serve-skills` watched every
+  directory of the project; on macOS and the BSDs (kqueue) each watched directory and each file in it costs an open
+  descriptor, so one server held 50,000 to 110,000 in a large monorepo and a few servers overflowed the system file
+  table. The watcher now has a budget of 2,048 descriptors, spends it breadth first (shallow convention directories
+  such as `.claude` and `skills` first), and warns once when the budget is reached; the periodic poll covers what is
+  left unwatched. Each daemon has its own budget, so many worktrees cost a few thousand descriptors each, not tens of
+  thousands. `no_watch = true` still disables the watcher ([#480](https://github.com/Goldziher/ai-rulez/issues/480)).
+- **The shared daemon no longer pins the checkout.** `mcp --daemon-server` changes to its private cache directory after
+  start, so a throwaway worktree can be removed, and exits when its repository directory is gone instead of waiting out
+  the idle timeout. The new `[mcp] daemon_idle_timeout` (a Go duration such as `"2m"`) sets that timeout, 15 minutes by
+  default. The daemon's stderr (a watch budget reached, why it exited) now goes to `daemon.log` beside its socket
+  instead of the null device ([#481](https://github.com/Goldziher/ai-rulez/issues/481)).
+- **A read-only skills server registers only the skill tools by default.** `mcp --serve-skills` with `read_only`
+  registered 43 tools, about 92 KB of schema sent on every request. It now registers `find_skill`, `load_skill`,
+  `search_skills`, `read_skill_file` and `list_skill_resources` (a few KB) and no prompts; `[mcp] authoring = true`
+  restores the full read-only set and the `review-config` prompt, and `tools = [...]` still names the list explicitly
+  ([#482](https://github.com/Goldziher/ai-rulez/issues/482)).
+- **A long home directory no longer silently disables the daemon.** When the socket path under the cache is too long
+  (104 bytes on Linux, 100 on macOS and the BSDs, with a margin), the socket moves to
+  `$XDG_RUNTIME_DIR` or the temp directory under `ai-rulez-<uid>/`. The daemon, its log and the proxy only use it when
+  this user owns both that directory and the one inside it with mode 0700, and the log is never opened through a link,
+  so another user on a shared `/tmp` cannot redirect them. If no path fits, the session logs a warning (it was debug
+  level) and serves in-process ([#483](https://github.com/Goldziher/ai-rulez/issues/483)).
+
 ## [5.6.2] - 2026-10-21
 
 ### Added

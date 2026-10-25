@@ -1982,6 +1982,8 @@ self_server = true                # default; add ai-rulez's own MCP server to .m
 # deny = ["draft-*"]                         # mcp --serve-skills never serves matching skills (--deny)
 # daemon = true                              # mcp --serve-skills shares one server per repository (--daemon)
 # no_watch = true                            # mcp --serve-skills does not reload on file changes (--no-watch)
+# daemon_idle_timeout = "15m"                # the shared daemon exits this long after its last client
+# authoring = true                           # keep the authoring tools on a read-only skills server
 # exclude = ["third_party/**"]               # globs of paths repository discovery never reads (--exclude adds to them)
 ```
 
@@ -2000,6 +2002,8 @@ self_server = true                # default; add ai-rulez's own MCP server to .m
 | `read_only`                | `true` registers only the read-only tools, as `mcp --read-only` does; the server instructions and prompts follow. The `--read-only` flag overrides it. An organization policy with `[mcp] read_only = true` cannot be loosened by it (`AR740`). |
 | `tools`                    | The only tools the server registers, as `mcp --tools` does, for example `["find_skill", "load_skill", "find_context", "load_context"]`. An unknown name stops the server and lists the valid ones. The `--tools` flag overrides it. |
 | `allow`, `deny`            | Glob patterns on the served skill names (`mcp --serve-skills --allow` and `--deny`); `deny` wins. The flags override them. |
+| `daemon_idle_timeout`      | How long the shared daemon outlives its last client, as a Go duration (`"2m"`); default 15 minutes. The daemon also exits when its repository directory is removed. |
+| `authoring`                | `true` keeps the authoring tools on a read-only skills server. Without it, `read_only` with `serve_skills` registers only `find_skill`, `load_skill`, `search_skills`, `read_skill_file` and `list_skill_resources`, a few KB of schema instead of about 92 KB. `tools` wins over both. |
 | `daemon`, `no_watch`       | `mcp --serve-skills --daemon` (one shared server per repository) and `--no-watch` (no live reload). The flags override them. |
 
 The `mcp` serve keys are read when the server starts. See [Settings in the configuration](mcp-server.md#settings-in-the-configuration).
@@ -2023,6 +2027,19 @@ Behavior:
 - **Turning it off**: `self_server = false` (or `generate --no-self-mcp`) stops ai-rulez from owning
   the entry but does not delete it; remove `mcpServers.ai-rulez` from `.mcp.json` yourself.
   `ai-rulez clean` likewise leaves a `.mcp.json` that holds hand-authored servers in place.
+
+##### Keeping directories out of `generate --recursive`
+
+`generate --recursive` (and `validate --recursive`) searches every directory below the working directory for
+configuration, except build output, dependency and hidden directories and `testdata`. A repository that keeps
+deliberately invalid configurations elsewhere (test fixtures, golden corpora) lists them in the configuration of the
+directory the run starts from (`.ai-rulez/config.toml`, `.agents/ai-rulez.toml` or `.config/ai-rulez/config.toml`):
+
+```toml
+recursive_exclude = ["tests/fixtures", "svc/*/gen"]   # directories or globs, relative to the project root
+```
+
+`generate --recursive --exclude <dir>` adds to the list for one run.
 
 ##### `mcp_servers`
 
@@ -10245,7 +10262,7 @@ It is on by default for a project that generates for Claude Code, and it does no
 # when = "remote"        # "remote": act only when CLAUDE_CODE_REMOTE is set; "always": every session
 # mode = "auto"          # auto | locked | frozen | plain
 # timeout = 120          # seconds the whole run may take before it is killed
-# version = "5.6.2"      # pin npx and uvx to a release; default is the latest published one
+# version = "5.6.3"      # pin npx and uvx to a release; default is the latest published one
 # command = ["ai-rulez"] # replaces the launcher; runs without a shell; excludes version
 # prompt = true          # inject the short briefing
 # prompt_text = "..."    # replaces the briefing; {{server}} is the ai-rulez MCP server's name
@@ -13327,7 +13344,7 @@ These are two independent choices:
   The publish workflow moves it to the commit of each successfully published stable v5 release,
   after GitHub, npm, PyPI and Homebrew publication. Release candidates never move it, and rerunning
   an older release cannot move it backward.
-- `with: version: 5.6.2` selects the **CLI binary**. Accepts `X.Y.Z`, `vX.Y.Z`, or `latest`
+- `with: version: 5.6.3` selects the **CLI binary**. Accepts `X.Y.Z`, `vX.Y.Z`, or `latest`
   (the default). `version: v5` is unsupported: the floating tag is an action ref, not a binary release.
   Omitting `version` downloads the latest public GitHub release, even when the action ref is pinned.
 
@@ -13350,7 +13367,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: Goldziher/ai-rulez@v5
         with:
-          version: 5.6.2
+          version: 5.6.3
       - run: ai-rulez generate --check
       - run: ai-rulez validate --strict
       - run: ai-rulez lock --check
@@ -13405,7 +13422,7 @@ steps:
       fetch-depth: 2
   - uses: Goldziher/ai-rulez@v5
     with:
-      version: 5.6.2
+      version: 5.6.3
       llm-provider: openai
       llm-model: gpt-4o-mini
       llm-api-key-env: OPENAI_API_KEY
@@ -13431,7 +13448,7 @@ diagnostic requires a project; `llm estimate` can run without one.
 ```yaml
 - uses: Goldziher/ai-rulez@v5
   with:
-    version: 5.6.2
+    version: 5.6.3
 - name: Inspect LLM configuration without a request
   env:
     AI_RULEZ_LLM_PROVIDER: openai
@@ -18337,7 +18354,7 @@ Add a Git source to `poly.toml`:
 [[hooks.sources]]
 id = "ai-rulez"
 git = "https://github.com/Goldziher/ai-rulez.git"
-revision = "v5.6.2"
+revision = "v5.6.3"
 hooks = ["ai-rulez-validate"]
 ```
 
@@ -21673,12 +21690,27 @@ allow     = ["review-*"]                                          # --allow (--s
 deny      = ["draft-*"]                                           # --deny (--serve-skills)
 daemon    = true                                                  # --daemon (--serve-skills)
 no_watch  = true                                                  # --no-watch (--serve-skills)
+daemon_idle_timeout = "15m"                                       # how long the daemon outlives its last client
+authoring = true                                                  # keep the authoring tools on a read-only skills server
 ```
 
-- **Skills keys without serving.** `allow`, `deny`, `daemon`, `no_watch`, `exclude` and `discover_skills` only apply
-  when skills are served (`--serve-skills` or `serve_skills = true`). A server started without serving them logs one
-  warning on stderr naming the keys that are set and ignored; the same settings as flags stop the server with
-  `requires --serve-skills`, because a key may be shared by launches that do not serve skills.
+- **A small default surface.** `serve_skills` with `read_only` registers only `find_skill`, `load_skill`,
+  `search_skills`, `read_skill_file` and `list_skill_resources`, and no prompts: the full tool list is about 92 KB of
+  schema that a client sends on every request. Set `authoring = true` for the read-only authoring tools and the
+  `review-config` prompt, or `tools = [...]` for an exact list.
+- **Large repositories.** The live-reload watcher holds at most 2,048 descriptors (kqueue on macOS and the BSDs
+  charges one per directory and per file in it), watching shallow directories first and warning once when the
+  budget is reached; the poll covers the rest. `no_watch = true` turns the watcher off.
+- **The daemon.** It outlives its client for `daemon_idle_timeout` (15 minutes by default) and exits at once when its
+  repository is removed; it does not keep the checkout as its working directory. Its stderr goes to `daemon.log` beside
+  the socket. When the cache path is too long for a unix socket, the socket goes under `$XDG_RUNTIME_DIR` or the temp
+  directory in `ai-rulez-<uid>/`, used only when this user owns that directory and the one inside it with mode 0700.
+
+- **Skills keys without serving.** `allow`, `deny`, `daemon`, `daemon_idle_timeout`, `authoring`, `no_watch`, `exclude`
+  and `discover_skills` only apply when skills are served (`--serve-skills` or `serve_skills = true`). A server
+  started without serving them logs one warning on stderr naming the keys that are set and ignored; the same settings
+  as flags stop the server with `requires --serve-skills`, because a key may be shared by launches that do not serve
+  skills.
 - **A flag wins.** A flag given on the command line replaces the key, including `--read-only=false` and an empty
   `--tools=`. A flag that is not given leaves the key in charge.
 - **Read at start.** The settings are read when the server starts; change them and restart the server. They are
@@ -22502,6 +22534,7 @@ Generate output files from the current configuration.
 - `profile` (optional, string): Profile to generate, or a comma-separated list to compose several (`--profile`)
 - `role` (optional, string): Generate the slice of content a role selects (`--role`); mutually exclusive with `profile`
 - `recursive` (optional, boolean): Generate for all subdirectories containing `.ai-rulez/`
+- `exclude` (optional, array of strings): With `recursive`, directories never searched for configuration, as globs or paths relative to the working directory (`--exclude`); adds to `recursive_exclude`
 - `no_local` (optional, boolean): Ignore the machine-local `config.local.*` overlay and `local/` content (the view a teammate sees)
 - `no_self_mcp` (optional, boolean): Do not add ai-rulez's own MCP server to the generated MCP files (`--no-self-mcp`; the default is to add it)
 - `working_directory` (optional, string): Directory to operate in
@@ -28917,6 +28950,7 @@ ai-rulez generate [flags]
 | `--force`                       | boolean | false         | Overwrite an existing file ai-rulez cannot prove it wrote (see [Existing files](#existing-files-generate-will-not-overwrite)). A symlinked output stays refused |
 | `--gitignore`            | boolean | (from config) | Update `.gitignore` with generated output patterns git does not already ignore (a rule or `!` override of yours wins)                                                                                                      |
 | `--recursive`            | boolean | false         | Find and process configs recursively; exits non-zero if any root fails (the others are still processed)                                                 |
+| `--exclude`             | string, repeatable | -  | With `--recursive`, do not search below this directory (a glob such as `svc/*/gen`, or a directory such as `tests/fixtures`, relative to the working directory). Adds to `recursive_exclude` in the root `config.toml`. `testdata` directories are never searched |
 | `--offline`             | boolean | false         | Skip fetching remote includes and use cached content                                                                                                    |
 | `--verify-tags`                 | boolean | false         | Before generating, ask the remotes whether a tag pinned in `ai-rulez.lock` moved (`AR732`, exit 2) or was deleted (`AR735`); needs the network. Also `[lock] verify_tags = true` |
 | `--refresh-remote`              | boolean | false         | Before generating, re-resolve remote installed skills, includes and skill sources to the newest version their constraint allows and rewrite `ai-rulez.lock`. The security scan of the new trees runs first and a refusal aborts before any output is written. Also `[lock] refresh_on_generate = true`. Needs the network; cannot be combined with `--check`, `--dry-run`, `--emit-plan`, `--locked`, `--frozen`, `--offline`, `--watch`, `--recursive`, `--user` or `--plugin` |
@@ -32085,6 +32119,7 @@ ai-rulez generate --locked
 | `--emit-plan` | string |  | Write the generation plan (every file that would be written, merged or removed, with digests; no secrets) as JSON to FILE ('-' for stdout) and apply nothing; see schema/plan.schema.json |
 | `--env` | string list |  | MCP env override in KEY=VALUE form (repeatable) |
 | `--env-file` | string list |  | Dotenv file for MCP env placeholders (repeatable) |
+| `--exclude` | string list |  | With --recursive, do not look for configuration below this directory (a glob or directory prefix relative to the working directory; repeatable) |
 | `--force` | bool |  | Overwrite an existing file ai-rulez cannot prove it wrote (a hand-written CLAUDE.md); without it generate refuses that file and exits 1 |
 | `--format` | string | `text` | Output format: text, json |
 | `--frozen` | bool |  | Like --locked, and never use the network: resolve only from the local cache, verified against the lock |
@@ -35238,7 +35273,7 @@ Add a `.vscode/settings.json` to reference the schema:
 - **`agents_md_split`**: With the agents source, read `AGENTS.md` as one context item per `##` heading (default `false`); see [Splitting AGENTS.md](agents-source.md#splitting-agentsmd)
 - **`agents_md`**: Render `AGENTS.md` and `.agents/skills` once for the presets that read them (default `true`)
 - **`mcp_servers`**: Array of MCP server configurations
-- **`mcp`**: Project-level MCP generation options (`self_server`, `self_server_version`, `self_server_launcher`, `self_server_command`, `skills_instructions`, `skills_instructions_text`, `serve_skills`, `discover_skills`, `index_cache`, `read_only`, `daemon`, `no_watch`, `allow`, `deny`, `tools`, `exclude`)
+- **`mcp`**: Project-level MCP generation options (`self_server`, `self_server_version`, `self_server_launcher`, `self_server_command`, `skills_instructions`, `skills_instructions_text`, `serve_skills`, `discover_skills`, `index_cache`, `read_only`, `daemon`, `daemon_idle_timeout`, `authoring`, `no_watch`, `allow`, `deny`, `tools`, `exclude`)
 - **`plugins`**: Array of plugin installs from a marketplace (consumer side)
 - **`marketplaces`**: Array of marketplace sources
 - **`plugin`**: Producer-side authoring block for a distributable plugin bundle

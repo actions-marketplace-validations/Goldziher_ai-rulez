@@ -756,6 +756,8 @@ self_server = true                # default; add ai-rulez's own MCP server to .m
 # deny = ["draft-*"]                         # mcp --serve-skills never serves matching skills (--deny)
 # daemon = true                              # mcp --serve-skills shares one server per repository (--daemon)
 # no_watch = true                            # mcp --serve-skills does not reload on file changes (--no-watch)
+# daemon_idle_timeout = "15m"                # the shared daemon exits this long after its last client
+# authoring = true                           # keep the authoring tools on a read-only skills server
 # exclude = ["third_party/**"]               # globs of paths repository discovery never reads (--exclude adds to them)
 ```
 
@@ -774,6 +776,8 @@ self_server = true                # default; add ai-rulez's own MCP server to .m
 | `read_only`                | `true` registers only the read-only tools, as `mcp --read-only` does; the server instructions and prompts follow. The `--read-only` flag overrides it. An organization policy with `[mcp] read_only = true` cannot be loosened by it (`AR740`). |
 | `tools`                    | The only tools the server registers, as `mcp --tools` does, for example `["find_skill", "load_skill", "find_context", "load_context"]`. An unknown name stops the server and lists the valid ones. The `--tools` flag overrides it. |
 | `allow`, `deny`            | Glob patterns on the served skill names (`mcp --serve-skills --allow` and `--deny`); `deny` wins. The flags override them. |
+| `daemon_idle_timeout`      | How long the shared daemon outlives its last client, as a Go duration (`"2m"`); default 15 minutes. The daemon also exits when its repository directory is removed. |
+| `authoring`                | `true` keeps the authoring tools on a read-only skills server. Without it, `read_only` with `serve_skills` registers only `find_skill`, `load_skill`, `search_skills`, `read_skill_file` and `list_skill_resources`, a few KB of schema instead of about 92 KB. `tools` wins over both. |
 | `daemon`, `no_watch`       | `mcp --serve-skills --daemon` (one shared server per repository) and `--no-watch` (no live reload). The flags override them. |
 
 The `mcp` serve keys are read when the server starts. See [Settings in the configuration](mcp-server.md#settings-in-the-configuration).
@@ -797,6 +801,19 @@ Behavior:
 - **Turning it off**: `self_server = false` (or `generate --no-self-mcp`) stops ai-rulez from owning
   the entry but does not delete it; remove `mcpServers.ai-rulez` from `.mcp.json` yourself.
   `ai-rulez clean` likewise leaves a `.mcp.json` that holds hand-authored servers in place.
+
+### Keeping directories out of `generate --recursive`
+
+`generate --recursive` (and `validate --recursive`) searches every directory below the working directory for
+configuration, except build output, dependency and hidden directories and `testdata`. A repository that keeps
+deliberately invalid configurations elsewhere (test fixtures, golden corpora) lists them in the configuration of the
+directory the run starts from (`.ai-rulez/config.toml`, `.agents/ai-rulez.toml` or `.config/ai-rulez/config.toml`):
+
+```toml
+recursive_exclude = ["tests/fixtures", "svc/*/gen"]   # directories or globs, relative to the project root
+```
+
+`generate --recursive --exclude <dir>` adds to the list for one run.
 
 ### `mcp_servers`
 
