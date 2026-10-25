@@ -445,7 +445,12 @@ Rules of thumb: serve domain skills, keep a handful of core convention skills st
   `disable-model-invocation: true` hides the skill from the Skill tool, which refuses it and tells the model not
   to reproduce the workflow another way. A rule that points at it by name ("run the `x` skill", `Skill(x)`) then
   leaves the model declining even though it could read the file; `AR9R1` warns. Point at the file path
-  (`.claude/skills/<id>/SKILL.md`) or a `load_skill` call, or drop `disable-model-invocation`.
+  (`.claude/skills/<id>/SKILL.md`), or set `[mcp] serve_user_invoked_skills = true` and use `load_skill` (the skills
+  server hides a user-only skill from the model otherwise, so a `load_skill` or `find_skill` pointer fails too), or
+  drop `disable-model-invocation`.
+- **`disable-model-invocation` plus `served` is unreachable.** A `served` skill is never written to disk, so the
+  user has no slash command for it, and the skills server hides it from the model: nobody can run it. `AR9R2`
+  warns. Use `delivery: both`, or `[mcp] serve_user_invoked_skills = true`, or drop `disable-model-invocation`.
 
 ### Choosing the delivery
 
@@ -560,12 +565,34 @@ daemon    = true                                                  # --daemon (--
 no_watch  = true                                                  # --no-watch (--serve-skills)
 daemon_idle_timeout = "15m"                                       # how long the daemon outlives its last client
 authoring = true                                                  # keep the authoring tools on a read-only skills server
+serve_user_invoked_skills = true                                  # also serve skills that set disable-model-invocation
 ```
 
 - **A small default surface.** `serve_skills` with `read_only` registers only `find_skill`, `load_skill`,
   `search_skills`, `read_skill_file` and `list_skill_resources`, and no prompts: the full tool list is about 92 KB of
   schema that a client sends on every request. Set `authoring = true` for the read-only authoring tools and the
   `review-config` prompt, or `tools = [...]` for an exact list.
+- **User-only skills.** A skill that sets `disable-model-invocation: true` is Claude Code's user-only flag: the model
+  must not see or invoke it, only the user, with a slash command. The server honours it. `find_skill`, `search_skills`,
+  `list_skill_resources` and the `skill://` resources leave such a skill out, and `load_skill` / `get_skill` answer
+  `<name> is user-invoked only (disable-model-invocation)`. `serve_user_invoked_skills = true` serves them anyway, for a
+  client that has no slash commands and wants the model to reach them. `ai-rulez.lock` still pins them; only what the
+  model sees changes. A server that serves skills and also carries the authoring tools (`mcp --serve-skills`, or
+  `authoring = true`) applies the same rule to them: `read_skill` and `ai-rulez://skills/<name>` (matched by name,
+  `skill://` URI or source path) answer the same error, and `list_skills`, the `catalog` tool and the
+  `ai-rulez://catalog` resource (items and `skill_discovery.served`) leave the skill out, and so do `list_roles`
+  (with the role totals), `resolve_role`, `token_report`, `cost_report`, `sbom`, `lock_status`, `doctor`,
+  `validate_config` and `scan_content` (the objects and notes that name it; the headline token totals still count it), as do the per-scope skill
+  counts in the server instructions and the catalog `scopes`. The plain authoring server (`ai-rulez mcp` without
+  `--serve-skills`) is exempt: it serves no skills to a model, it edits the configuration, and the flag only keeps
+  a skill from the model's own invocation, so it still reads and lists every skill. A user-only skill on a serving
+  server stays editable with `update_skill` and `delete_skill`, which never return its content. The setting is read
+  when a server or daemon starts: restart a running `--daemon` (or let it idle out after `daemon_idle_timeout`)
+  after changing it, because a daemon is keyed by its command line, not by the configuration it read.
+- **Scope shadowing and directories.** A path query drops a skill that a nearer scope shadows by name, even when the
+  nearer skill is itself hidden (user-only) or its `paths:` do not reach the path, so the farther skill of that name
+  is not offered either. A directory query considers the skills whose globs could match a path below it, and does
+  not look into descendant scopes (ask for `scope` with `recursive` for those).
 - **Large repositories.** The live-reload watcher holds at most 2,048 descriptors (kqueue on macOS and the BSDs
   charges one per directory and per file in it), watching shallow directories first and warning once when the
   budget is reached; the poll covers the rest. `no_watch = true` turns the watcher off.
@@ -574,7 +601,7 @@ authoring = true                                                  # keep the aut
   the socket. When the cache path is too long for a unix socket, the socket goes under `$XDG_RUNTIME_DIR` or the temp
   directory in `ai-rulez-<uid>/`, used only when this user owns that directory and the one inside it with mode 0700.
 
-- **Skills keys without serving.** `allow`, `deny`, `daemon`, `daemon_idle_timeout`, `authoring`, `no_watch`, `exclude`
+- **Skills keys without serving.** `allow`, `deny`, `daemon`, `daemon_idle_timeout`, `authoring`, `serve_user_invoked_skills`, `no_watch`, `exclude`
   and `discover_skills` only apply when skills are served (`--serve-skills` or `serve_skills = true`). A server
   started without serving them logs one warning on stderr naming the keys that are set and ignored; the same settings
   as flags stop the server with `requires --serve-skills`, because a key may be shared by launches that do not serve
@@ -708,7 +735,7 @@ add up, so none of them is shadowed. A skill name that two scopes share is serve
  "results": [{"name": "pkg.api.claude.skills.lint", "scope": "pkg/api", "score": 1.4, "description": "Lint the api package"}]}
 ```
 
-The root's own `lint` is shadowed for that path; for `pkg/web/index.ts` it is the one returned. `scope` lists one exact
+The root's own `lint` is shadowed for that path; for `pkg/web/index.ts` it is the one returned. A skill whose `paths:` frontmatter does not reach the path is left out (see [Rules and skills with `paths`](#rules-and-skills-with-paths)). `scope` lists one exact
 scope, `"."` being the root; `recursive: true` adds the scopes below it. `path` and `scope` are mutually exclusive, and
 `recursive` needs `scope`. A skill that ai-rulez defines or fetches belongs to no scope and applies everywhere. Each
 result of a discovered skill names its `scope`. Without `path` and `scope` the call behaves as before.
@@ -735,15 +762,22 @@ description (an item with no matching word is left out), `kind` (`instruction`, 
    "description": "Code style for the whole repository", "uri": "context://./style", "hash": "sha256:..."}]}
 ```
 
-**Rules with `paths`.** A rule can name the files it applies to. With `path`, `find_context` returns such a rule only
-when the path matches one of its globs: `paths:` in the frontmatter of a Claude Code rule, and `globs:` of a Cursor
-`.mdc` rule that is not `alwaysApply`. The globs are relative to the scope directory, the one that holds `.claude`
-(or `.cursor`), as in `ai-rulez validate`: `pkg/api/.claude/rules/handlers.md` with `paths: "handlers/**"` applies to
-`pkg/api/handlers/user.go`, not to `pkg/api/other/handlers/user.go`. `paths` globs are anchored at that directory
-(`*.py` is a file directly in it, `**/*.py` any depth); Cursor `globs` also match a bare pattern such as `*.tsx` at any
-depth. A rule without either applies everywhere in its scope, and instruction files and agents are never narrowed. A
-`scope` query (no `path`) lists every rule of the scope whatever its globs. A rule's result carries its `paths` or
-`globs`, so you can see what narrows it. Pass a file as `path`: a directory matches no glob.
+**Rules and skills with `paths`.** A rule or a skill can name the files it applies to. With `path`, `find_context`
+returns such a rule, and `find_skill` such a skill, only when the path matches one of its globs: `paths:` in the
+frontmatter of a Claude Code rule or `SKILL.md` (Claude Code hides a path-gated skill until a matching file is read),
+and `globs:` of a Cursor `.mdc` rule that is not `alwaysApply`. Cursor has no skills, so a skill's `globs:` is not read.
+The globs are relative to the scope directory, the one that holds `.claude` (or `.cursor`), as in `ai-rulez validate`:
+`pkg/api/.claude/rules/handlers.md` with `paths: "handlers/**"` applies to `pkg/api/handlers/user.go`, not to
+`pkg/api/other/handlers/user.go`. `paths` globs are anchored at that directory (`*.py` is a file directly in it,
+`**/*.py` any depth); Cursor `globs` also match a bare pattern such as `*.tsx` at any depth. A rule or skill without
+either applies everywhere in its scope, and instruction files and agents are never narrowed. A `scope` query (no
+`path`) lists every rule and skill of the scope whatever its globs, and loading one by name is unchanged. A rule's
+result carries its `paths` or `globs`, so you can see what narrows it.
+
+`path` may be a file or a directory. A directory keeps a rule or skill when some glob could match a path below it:
+`backend/services/**/kafka*.py` is kept for `backend/services` and dropped for `products/web`, and `**/*.py` is kept for any
+directory. A path that exists is a directory if the filesystem says so; one that does not exist is a file when its last
+element has an extension. A restriction none of whose globs can be read does not hide the item.
 
 `load_context` reads one, by `scope` and `name` or by `uri`, with an optional `budget_bytes`:
 

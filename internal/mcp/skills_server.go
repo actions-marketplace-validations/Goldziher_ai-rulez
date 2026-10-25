@@ -90,9 +90,9 @@ func newServingServer(version string, catalog *Catalog, opts ServeOptions, autho
 	}
 	caps.AddExtension(SkillsExtensionID, map[string]any{"directoryRead": true})
 	srv := &Server{
-		version: version, catalog: catalog, serve: newServeState(opts), authoring: merged,
-		scopeNote: scopeSummary(catalog.repository()),
+		version: version, serve: newServeState(opts), authoring: merged,
 	}
+	srv.catalog = srv.served(catalog)
 	for _, opt := range authoring {
 		opt(srv)
 	}
@@ -252,10 +252,16 @@ func (s *Server) searchSkillsHandler(_ context.Context, req *handlers.ToolReques
 }
 
 func (s *Server) getSkillHandler(_ context.Context, req *handlers.ToolRequest) (*sdkmcp.CallToolResult, error) {
-	key := req.GetString(keyName, "")
+	key := strings.TrimSpace(req.GetString(keyName, ""))
+	if rest, uri := strings.CutPrefix(key, SkillURIScheme); uri {
+		key, _, _ = strings.Cut(rest, "/")
+	}
 	cat := s.cat()
 	skill, ok := cat.Lookup(key)
 	if !ok {
+		if cat.UserInvoked(key) {
+			return handlers.ToolError(userInvokedError(key))
+		}
 		if r, refused := cat.Refusal(key); refused {
 			return handlers.ToolError(fmt.Errorf("skill %q is refused (%s): %s", key, r.Code, r.Reason))
 		}

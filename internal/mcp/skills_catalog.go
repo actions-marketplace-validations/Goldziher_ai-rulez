@@ -105,7 +105,13 @@ type Catalog struct {
 	byURI   map[string]*CatalogSkill
 	byFile  map[string]*CatalogFile
 	refused map[string]Refusal
-	reports []ScanReport
+	// userOnly names the skills a serving server holds back from the model
+	// (disable-model-invocation); see withoutUserInvoked.
+	userOnly map[string]bool
+	// userOnlyPaths holds the source paths of the held skills, so the authoring
+	// surface refuses a skill named by its path too.
+	userOnlyPaths map[string]bool
+	reports       []ScanReport
 	// discovery is what skill discovery found; nil when it did not run.
 	discovery *DiscoveryReport
 	// repo is the repository index discovery built; nil when it did not run.

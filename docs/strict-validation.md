@@ -257,7 +257,8 @@ ai-rulez validate --strict --outputs
 | AR995 | `served-lock-mismatch` | error | `[lock] enforce = true` and a served skill is not pinned in `ai-rulez.lock` or its digest differs; the server refuses to serve it |
 | AR989 | `served-file-unscannable` | warning / error | A served skill file (authored skills included) is binary (a NUL byte, invalid UTF-8) or larger than 512 KiB, so the security scan cannot read it. For a remote source (`trust = "error"`) the file is not served; a `SKILL.md` that cannot be scanned is an error and the skill is refused |
 | AR9R0 | `served-skill-bundled-files` | warning | A served skill ships files under `scripts/` or `assets/`, which are not written to the skill tree of a harness that can call MCP (the shared `.agents/skills` tree included); a relative path into them (the form SKILL.md usually uses) resolves to nothing. `references/` are exempt (readable over MCP with `list_skill_resources`/`load_skill`). Set `delivery: both` to keep the files on disk, or fetch them over MCP and write them out yourself (see [Served files](mcp-server.md#served-files-scripts-and-assets) and [Dynamic skill loading](mcp-server.md#dynamic-skill-loading)) |
-| AR9R1 | `both-dmi-pointer` | warning | Always-loaded content points at a skill whose `delivery` is `both` and whose frontmatter sets `disable-model-invocation: true` (or `disable_model_invocation`), by a bare name or `Skill(...)`; the Skill tool refuses a DMI skill, so the model then declines the workflow. A file-path pointer and a `load_skill`/`find_skill` pointer are not reported (see [Dynamic skill loading](mcp-server.md#dynamic-skill-loading)) |
+| AR9R1 | `both-dmi-pointer` | warning | Always-loaded content points at a skill whose `delivery` is `both` and whose frontmatter sets `disable-model-invocation: true` (or `disable_model_invocation`), by a bare name or `Skill(...)`; the Skill tool refuses a DMI skill, so the model then declines the workflow. A file-path pointer is not reported. A `load_skill`/`find_skill` pointer is reported too, unless `[mcp] serve_user_invoked_skills = true` (the skills server hides a user-only skill from the model otherwise; see [Dynamic skill loading](mcp-server.md#dynamic-skill-loading)) |
+| AR9R2 | `served-dmi-unreachable` | warning | A skill whose `delivery` is `served` sets `disable-model-invocation: true` (or `disable_model_invocation`): a served skill is never written to disk, so the user has no slash command for it, and the skills server hides it from the model, so nobody can run it. Set `delivery: both`, or `[mcp] serve_user_invoked_skills = true`, or drop the flag. Not reported when `serve_user_invoked_skills` is on |
 | AR971 | `role-reference-unknown` | error | A `[[roles]]` entry lists a domain that does not exist, or an include, exclude or `skill_mode` entry that matches no item (or matches only in a domain the role does not select). See [Roles](roles.md) |
 | AR972 | `role-extends-invalid` | error | A role extends an unknown role, itself, or takes part in a cycle, or extends a role that itself extends another (inheritance is one level deep) |
 | AR973 | `role-unreachable-dependency` | warning | An item a role keeps lists a skill in its `skills:` frontmatter that the role drops, or hides from the model with `skill_mode` `off` or `user-invocable-only` |
@@ -370,6 +371,19 @@ ai-rulez validate --strict --outputs
 | AR9J8 | `improve-pr-refused` | error | `improve pr` refused: unsigned or unaccepted run, a different skill at the base, an existing branch, or unusable git |
 | AR9J9 | `improve-adapter-refused` | error | A bundled adapter (`builtin:review-fix`) could not run: no model, no network opt-in or no declared egress |
 
+### Generated copies and the duplicate rules
+
+A skill, agent or command file that a plugin bundle of the configuration generates from a definition, or a
+byte-identical copy of one anywhere in the repository (a public export of the bundle's skills), is that definition under
+another path, not a second one: `AR701`, `AR702` and `AR703` do not compare it with the definition. `validate` renders
+the bundles of the configuration's `[plugin]` and of its `[marketplace]` members in memory, the way `verify --plugin`
+does, when it has a duplicate to judge, and a copy counts as the same item only when its bytes equal what the generator
+renders from that definition now; CRLF line endings are read as LF, and nothing else is normalized. A generated header
+or an `.ai-rulez-generated.json` sidecar proves nothing on its own. An edited copy, a copy the definition has moved away
+from since it was generated (run `generate --plugin`), the bundle of a configuration the run does not load (a nested
+plugin that is not a `[marketplace]` member), domain plugins and `[[plugins_authoring]]` bundles are judged as
+definitions of their own. Every other rule, the security rules first, still reads the generated copies.
+
 ### Code ranges
 
 Codes are allocated in blocks, one block per feature. This table is the single allocation list: a registered code
@@ -416,7 +430,7 @@ and the codes written as literals in other packages, against it). Ranges are inc
 | `AR9P0`-`AR9P9` | llms.txt files ([llms.txt](llms-txt.md); `AR9P0`-`AR9P6` used) | allocated |
 | `AR9I0`-`AR9I9` | Lint configuration hygiene ([#479](https://github.com/Goldziher/ai-rulez/issues/479); `AR9I0` used, reported by `validate`, see [Accepting one finding](#accepting-one-finding)) | allocated |
 | `AR9Q0`-`AR9Q9` | Harness instruction files ([#318](https://github.com/Goldziher/ai-rulez/issues/318); `AR9Q0` used, reported by `validate --strict` when `[lint] agents_md_only` is set) | allocated |
-| `AR9R0`-`AR9R9` | Served-skill on-disk traps ([#336](https://github.com/Goldziher/ai-rulez/issues/336), [#337](https://github.com/Goldziher/ai-rulez/issues/337); `AR9R0`, `AR9R1` used) | allocated |
+| `AR9R0`-`AR9R9` | Served-skill on-disk traps ([#336](https://github.com/Goldziher/ai-rulez/issues/336), [#337](https://github.com/Goldziher/ai-rulez/issues/337); `AR9R0`-`AR9R2` used) | allocated |
 | `AR9O0`-`AR9O9` | Agent Plugins packages ([#279](https://github.com/Goldziher/ai-rulez/issues/279); `AR9O0`-`AR9O5` used, `AR9O6`-`AR9O9` free; reported by `validate --strict` and `publish`, see [Agent Plugins](agent-plugins.md)) | allocated |
 | `AR9S0`-`AR9S9` | Agentic Resource Discovery manifest ([#280](https://github.com/Goldziher/ai-rulez/issues/280); `AR9S0`-`AR9S4` used, `AR9S5`-`AR9S9` free; reported by `validate --strict` and `publish`, see [Agentic Resource Discovery](ard.md)) | allocated |
 | `AR9T0`-`AR9T9` | Plugin bundle root components ([#357](https://github.com/Goldziher/ai-rulez/issues/357); `AR9T0`, `AR9T1` used; reported by `validate --strict` and `verify --plugin`, see [Authoring Plugins](plugins.md#single-plugin-vs-monorepo)) | allocated |
@@ -770,7 +784,7 @@ about: `file` (a line of a scanned text file), `item` (one rule, skill, agent, c
 | `plugin` | `AR961`-`AR964` |
 | `roles` | `AR971`-`AR973` |
 | `lock` | `AR730`, `AR732`, `AR733`, `AR734`, `AR735`, `AR981`, `AR982`, `AR995` |
-| `delivery` | `AR989`-`AR994`, `AR9R0`, `AR9R1` |
+| `delivery` | `AR989`-`AR994`, `AR9R0`-`AR9R2` |
 | `evals` | `AR996`-`AR998`, `AR9A0`-`AR9A5` |
 | `okf` | `AR9B0`-`AR9B9` |
 | `llmstxt` | `AR9P0`-`AR9P6` |
@@ -4259,7 +4273,17 @@ always-loaded content points at a delivery: both skill whose frontmatter sets di
 - Analyzer: `delivery` (scope `item`)
 - Why: A `both` skill is on disk, but `disable-model-invocation: true` hides it from the Skill tool, which refuses it and tells the model not to replicate the workflow another way. A rule that points at it by name ("run the `x` skill", `Skill(x)`) leaves the model declining, even though it could read the file.
 - Bad: A rule saying "run the `deploy` skill" for a `both` skill with `disable-model-invocation: true`
-- Good: Point at the file path (`.claude/skills/deploy/SKILL.md`) or a `load_skill` call, or drop `disable-model-invocation`
+- Good: Point at the file path (`.claude/skills/deploy/SKILL.md`), or set `[mcp] serve_user_invoked_skills = true` and use `load_skill`, or drop `disable-model-invocation`
+
+### AR9R2 served-dmi-unreachable
+
+a delivery: served skill sets disable-model-invocation: true, so nobody can run it: it is not written to disk (no slash command) and the skills server hides it from the model; set delivery: both, or [mcp] serve_user_invoked_skills = true
+
+- Default severity: `warning`
+- Analyzer: `delivery` (scope `item`)
+- Why: A `served` skill is never written to disk, so the user has no slash command for it, and the skills server keeps a `disable-model-invocation: true` skill from the model. Nobody can run it.
+- Bad: A `delivery: served` skill with `disable-model-invocation: true`
+- Good: Set `delivery: both` (the file is on disk for the slash command), or `[mcp] serve_user_invoked_skills = true`, or drop `disable-model-invocation`
 
 ### AR9S0 ard-manifest-invalid
 

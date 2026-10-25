@@ -6,6 +6,56 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
+### Added
+
+- **`AR9R2 served-dmi-unreachable`** warns when a `delivery: served` skill sets `disable-model-invocation: true`: a
+  served skill is never written to disk (no slash command) and the skills server now hides a user-only skill from
+  the model, so nobody can run it. Set `delivery: both`, or `[mcp] serve_user_invoked_skills = true`. `AR9R1` now
+  reports a `load_skill`/`find_skill` pointer to a `both` user-only skill too, unless that setting is on.
+
+### Fixed
+
+- **`AR701`, `AR702` and `AR703` no longer treat a generated copy of a skill as a second definition.** A plugin
+  bundle's generated `skills/<name>/SKILL.md` (and a byte-identical public export of it) repeats the description and
+  the name of the skill it was generated from, so `validate` reported each copy as a duplicate description of its own
+  source and, run from the plugin's configuration, as a collapsed duplicate, and `--strict` failed. `validate` now
+  renders the plugin bundles of the configuration in memory, as `verify --plugin` does (a `[marketplace]` member the
+  way its producer renders it), and a skill, agent or command file counts as the same item as a definition only when
+  its bytes equal what the generator renders from that definition now (CRLF line endings aside). Generated headers and
+  `.ai-rulez-generated.json` grant nothing: a hand-written file with a copied header and sidecar, an edited copy, a copy
+  left stale by a later edit of its definition and an independently written skill with the same name or description
+  are still reported, and every other rule, the security rules first, still reads the generated copies
+  ([#485](https://github.com/Goldziher/ai-rulez/issues/485)).
+- **`find_skill` and `load_skill` no longer hand a user-only skill to the model.** A skill with
+  `disable-model-invocation: true` (Claude Code's flag for a skill only the user runs, with a slash command) was
+  ranked by `find_skill`, listed by `search_skills` and the `skill://` resources, and served by `load_skill`. The
+  skills server now leaves such a skill out of all of them and `load_skill` answers `<name> is user-invoked only
+  (disable-model-invocation)`. The authoring tools of `mcp --serve-skills` (`read_skill`, `list_skills`, `catalog`
+  and the `ai-rulez://` item and catalog resources, including `skill_discovery.served`) and the per-scope skill
+  counts follow the same rule, as do the read-only report tools (`list_roles`, `token_report`, `cost_report`,
+  `sbom`, `doctor`, `validate_config`, ...); the plain `ai-rulez mcp` server still reads every skill. `get_skill` answers the same
+  message for a `skill://` URI. `ai-rulez.lock` is unchanged. `[mcp] serve_user_invoked_skills = true` serves them
+  as before (a running `--daemon` reads the setting when it starts).
+- **A path-scoped `find_skill` no longer returns skills whose `paths:` do not reach the path.** Only rules were
+  narrowed by their `paths:` or `globs:`; a skill such as `.claude/skills/kafka-conventions` gated on
+  `backend/services/**` still came back for `products/web`, ranked by text alone, although Claude Code hides a
+  path-gated skill until a matching file is read. The skill index now reads `paths:` from `SKILL.md`, and `find_skill`
+  and `find_context`/`load_context` with `path` keep a rule or skill only when its globs match the file, or, for a
+  directory, could match a path below it (a directory used to match no glob and hid every path-gated rule). A skill
+  without `paths:`, a `scope` query and loading by name are unchanged. The monorepo index cache format moves to
+  version 3, so existing caches are rebuilt once.
+- **The watcher no longer misses a directory created while it attaches a tree.** Since 5.6.3 the tree was listed
+  before any of its directories were watched, so a directory created in between (for example right after a watched
+  `.ai-rulez/` was deleted and re-created) was never watched and edits inside it triggered no regeneration or index
+  refresh. The tree is now listed again once the watches are in place.
+- **`validate` no longer reports a valid `builtins` list as invalid beside another error.** When a configuration
+  failed the schema for any reason, such as an unknown key, the rejected boolean branch of `builtins` (boolean or
+  list) was reported too, as `builtins.type: Value is array but should be boolean`. Only the real errors are reported.
+- **MCP tools accept a call without arguments.** A client that sent `arguments: null` (or none) to a tool of a server
+  confined to its project root, such as `list_skills`, made the tool panic. Absent arguments now mean no arguments.
+- **`resolve_role` answers for a role that exists.** Its output schema declared `role` a string while the tool
+  returns the role object, so every successful call failed the schema check of the MCP SDK.
+
 ## [5.6.3] - 2026-10-24
 
 ### Added
@@ -16,8 +66,6 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
   configuration of the directory the run starts from (`.ai-rulez/config.toml`, `.agents/ai-rulez.toml` or
   `.config/ai-rulez/config.toml`), or `--exclude` (repeatable), names more. The `generate_outputs` MCP tool honours
   both (`recursive` with `exclude`).
-
-### Fixed
 
 - **The live-reload watcher no longer scales its descriptors with the repository.** `mcp --serve-skills` watched every
   directory of the project; on macOS and the BSDs (kqueue) each watched directory and each file in it costs an open
