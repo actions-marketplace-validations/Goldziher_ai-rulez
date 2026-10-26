@@ -42,4 +42,4 @@ jobs:
         with:
           ai-rulez-version: "5.6.3"
           source-revision: "d4a0cbe4712319312104ba3f2a618ef55645ef9f"
-      - uses: xberg-io/actions/validate-ai-rulez@cc89740654cef67b752113ddd87d4f0d23dda3f5
+      - uses: xberg-io/actions/validate-ai-rulez@793d3a4d37a17009d91cce29f2825eda570d2abd
