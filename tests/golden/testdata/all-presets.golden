@@ -110,7 +110,7 @@ WARN  4 rules/context items use an activation the target tool cannot express; th
 .agents/skills/ship/agents/openai.yaml file 0644 43 a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94
 .ai-rulez/ dir 0755
 .ai-rulez/.generated-manifest.json file 0644 25178 a570d047adbb8b6b5cecea31e70ecffc032bb46b56a5620420a5758221dc8318
-.ai-rulez/.generated-manifest.local.json file 0644 42047 70ad3b10fa980167851b7918410e7bae16bd5a4f0fac7ac41d10b506cbab84d3
+.ai-rulez/.generated-manifest.local.json file 0644 42047 eb3c5ee71780296e978f7e2e8bd005ad03503bd0700a10af815b68ff44025f74
 .ai-rulez/agents/ dir 0755
 .ai-rulez/agents/architect.md file 0644 97 fc714ad19a3a1c9348f1a954f3a7d43dfa07a8640a114d2f7c14777f23871d72
 .ai-rulez/agents/tester.md file 0644 82 72927a1eaca26accd861c5afde228c7c585007302e27d927af597b36733b831a
@@ -450,7 +450,7 @@ WARN  4 rules/context items use an activation the target tool cannot express; th
 .github/skills/reviewer/references/checklist.md file 0644 28 02393d1b57638cc3b06632e057556d199781a02f385c4299936253c78ecd5328
 .github/skills/reviewer/scripts/ dir 0755
 .github/skills/reviewer/scripts/run.sh file 0644 22 914c2af00a91392459c499b94b955b3334a860831f85bbf3c4cc644460f877b8
-.gitignore file 0644 5462 19705587e0b8b9eb47a40e252e2e3e96194432dbbbfee5670d4ca8ab458747a2
+.gitignore file 0644 5513 0414be06b749197e929917f103867fe890ee8e96aeb4a4925496a95c7afb93d2
 .gitlab/ dir 0755
 .gitlab/duo/ dir 0755
 .gitlab/duo/chat-rules.md file 0644 789 625473e36c682a95e0339179c22c821d94dc78496be3b54d523b398c34217c89

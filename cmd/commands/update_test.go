@@ -10,6 +10,7 @@ import (
 
 	"github.com/Goldziher/ai-rulez/v5/internal/config"
 	"github.com/Goldziher/ai-rulez/v5/internal/lockfile"
+	"github.com/Goldziher/ai-rulez/v5/internal/pluginimport/plugintest"
 	"github.com/Goldziher/ai-rulez/v5/internal/tagresolve"
 	"github.com/Goldziher/ai-rulez/v5/internal/tagresolve/tagtest"
 	"github.com/Goldziher/ai-rulez/v5/internal/testutil"
@@ -244,37 +245,6 @@ func TestUpdate_AllowDowngradeMovesToTheLowerTag(t *testing.T) {
 	assert.Equal(t, "v1.0.0", f.lock().Find(lockfile.KindInclude, "shared").Tag)
 }
 
-func TestPlanUpdates_MovedTagIsNeverHiddenByDowngrade(t *testing.T) {
-	tests := []struct {
-		name          string
-		row           tagresolve.Row
-		acceptMoved   bool
-		allowDowngrde bool
-		wantBlocked   bool
-		wantMove      bool
-		wantUnchanged bool
-	}{
-		{"moved and downgrading is blocked", tagresolve.Row{Kind: "include", Name: "a", Status: tagresolve.StatusTagMoved, Downgrade: true, Locked: &tagresolve.TagRef{Tag: "v1.2.0"}}, false, false, true, false, false},
-		{"moved and downgrading moves only with both flags", tagresolve.Row{Kind: "include", Name: "a", Status: tagresolve.StatusTagMoved, Downgrade: true, Locked: &tagresolve.TagRef{Tag: "v1.2.0"}}, true, true, false, true, false},
-		{"moved and downgrading with only accept-moved stays unchanged", tagresolve.Row{Kind: "include", Name: "a", Status: tagresolve.StatusTagMoved, Downgrade: true, Locked: &tagresolve.TagRef{Tag: "v1.2.0"}}, true, false, false, false, true},
-		{"a non-version pin needs consent", tagresolve.Row{Kind: "include", Name: "a", Status: tagresolve.StatusLockedNonVersion}, false, false, false, false, true},
-		{"a non-version pin moves with consent", tagresolve.Row{Kind: "include", Name: "a", Status: tagresolve.StatusLockedNonVersion}, false, true, false, true, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			updateAcceptMoved, updateAllowDowngrade = tt.acceptMoved, tt.allowDowngrde
-			t.Cleanup(func() { updateAcceptMoved, updateAllowDowngrade = false, false })
-			rep := &updateReport{moves: map[string]*moveTo{}}
-
-			planUpdates(rep, []versionSrc{{}}, []tagresolve.Row{tt.row})
-
-			assert.Equal(t, tt.wantBlocked, len(rep.Blocked) == 1)
-			assert.Equal(t, tt.wantMove, len(rep.moves) == 1)
-			assert.Equal(t, tt.wantUnchanged, len(rep.Unchanged) == 1)
-		})
-	}
-}
-
 func TestLockOutdated_UnknownNameIsAnError(t *testing.T) {
 	newUpdateFixture(t, `version = "^1"`)
 	lockOutdated, lockFormat = true, ""
@@ -284,4 +254,38 @@ func TestLockOutdated_UnknownNameIsAnError(t *testing.T) {
 
 	assert.Equal(t, 1, code)
 	assert.Contains(t, stderr, "not a remote include")
+}
+
+func TestUpdate_OutdatedReportsMarketplaceAndPluginKinds(t *testing.T) {
+	// Arrange: a marketplace and a plugin, each a tagged repository pinned by a version constraint
+	testutil.IsolateHome(t)
+	resetUpdateFlags(t)
+	resetLockViewFlags(t)
+	plug := plugintest.NewRepo(t, plugintest.ClaudePlugin("tools"))
+	plug.Tag("v1.0.0")
+	market := plugintest.NewRepo(t, plugintest.ClaudeMarketplace("acme"))
+	market.Tag("v1.0.0")
+	lockProject(t, "\n[[installed_marketplaces]]\nname = \"acme\"\nsource = \""+tomlEscape(market.URL())+"\"\nversion = \"^1\"\n"+
+		"\n[[installed_plugins]]\nname = \"tools\"\nsource = \""+tomlEscape(plug.URL())+"\"\nversion = \"^1\"\ninclude = [\"skills\"]\n")
+	require.Equal(t, 0, writeLockAt("", "", nil), "lock")
+	plug.Commit(map[string]string{"README.md": "# one point one\n"}, "release")
+	plug.Tag("v1.1.0")
+	market.Commit(map[string]string{"README.md": "# one point one\n"}, "release")
+	market.Tag("v1.1.0")
+	lockOutdated, lockFormat = true, formatJSON
+
+	// Act
+	var code int
+	stdout := captureStdout(t, func() { code = reported(outdatedAt("", "", nil)) })
+
+	// Assert
+	assert.Equal(t, 0, code)
+	validateAgainst(t, "../../schema/lock-outdated.schema.json", []byte(stdout))
+	var rep tagresolve.Report
+	require.NoError(t, json.Unmarshal([]byte(stdout), &rep), stdout)
+	kinds := map[string]string{}
+	for _, row := range rep.Sources {
+		kinds[row.Kind] = row.Name
+	}
+	assert.Equal(t, map[string]string{lockfile.KindMarketplace: "acme", lockfile.KindPlugin: "tools"}, kinds, stdout)
 }

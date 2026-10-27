@@ -61,7 +61,7 @@ WARN  3 rules/context items use an activation the target tool cannot express; th
 .agents/skills/ship/agents/openai.yaml file 0644 43 a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94
 .ai-rulez/ dir 0755
 .ai-rulez/.generated-manifest.json file 0644 5182 8b9cba82fbd93cba23059abb2ef961dbf94420ce88e565010e5eb7caebf9a31f
-.ai-rulez/.generated-manifest.local.json file 0644 19398 2fb08e29c61ba0a4375e70b0b3f3f542bfec0227e7f12473efe3d8fe44dadda3
+.ai-rulez/.generated-manifest.local.json file 0644 19398 ae2389b70bfc5e2c2df56bd5ba62be51ad040eeb8e140da76d0b83255fc03af7
 .ai-rulez/agents/ dir 0755
 .ai-rulez/agents/architect.md file 0644 97 fc714ad19a3a1c9348f1a954f3a7d43dfa07a8640a114d2f7c14777f23871d72
 .ai-rulez/agents/tester.md file 0644 82 72927a1eaca26accd861c5afde228c7c585007302e27d927af597b36733b831a
@@ -207,7 +207,7 @@ WARN  3 rules/context items use an activation the target tool cannot express; th
 .github/skills/reviewer/scripts/run.sh file 0644 22 914c2af00a91392459c499b94b955b3334a860831f85bbf3c4cc644460f877b8
 .github/skills/scratch/ dir 0755
 .github/skills/scratch/SKILL.md file 0644 150 840b60e9b2cd7374a669c0a76336256af88013efba44cd33f201a9c29dda5ec6
-.gitignore file 0644 1399 28724b7f60d7216b53038f01349cde1b24ca480cf1778012f91080cdc13ff7db
+.gitignore file 0644 1232 35a2d8c0ed05d23a1e6fe47fe91eea8527cf5b31cabf5ac4e9acb5fcfee301db
 .kilo/ dir 0755
 .kilo/agents/ dir 0755
 .kilo/agents/architect.md file 0644 171 9f499ed05e385eabe95c1ab5dd938a3b426684117be8fd3e9e906ccec47c409c
@@ -426,8 +426,7 @@ INFO  Generation complete files=73
 WARN  3 rules/context items use an activation the target tool cannot express; they are loaded always: items=rule auto, rule manual, rules manual
 --- project tree
 ~ .ai-rulez/.generated-manifest.json file 0644 4821 563e5bb622d69fbb76fc46dd52cda3730a48201fb75f1cb74478d595345c94fb
-~ .ai-rulez/.generated-manifest.local.json file 0644 18869 ac06b94393c1fbb9c5d12423bde431bae5b51bc92faca310ff01d2c4b357df66
-~ .gitignore file 0644 1355 dab9a0bd97bffaf4e0847a13d4f646fe18f1ad0a3e7031e99fb2b453d4add6ee
+~ .ai-rulez/.generated-manifest.local.json file 0644 18869 d2c7a912584efe677cb45de0f7d0c3a703344c1730d262a73554312af92be6d3
 --- home tree
 (no change)
 

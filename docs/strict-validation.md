@@ -561,7 +561,7 @@ env_pass = []                      # extra environment variable names for an egr
 # fail_on = "error"                # lowest severity of this scanner's findings that fails the run
 # cache_files = ["tools/**/*.py"]  # files the scanner reads; part of the result cache key (a script run through python3, node, sh... is hashed anyway)
 # max_message = 1000               # characters of a finding message kept in text output (default 500)
-# message_properties = ["evidence", "snippet"]   # SARIF result properties appended to the message (skillspector sets these)
+# message_properties = ["evidence", "snippet"]   # SARIF result properties appended to the message
 
 [lint.scanner_policy]
 preset = "strict"                  # off (default) | baseline | strict: embedded profiles that run with --external
@@ -1121,18 +1121,12 @@ installed; a scanner that is not on `PATH` is an `AR9E2` notice.
 | `agnix` | no | SARIF | baseline, strict | `agnix --format sarif <stage>`; not yet checked against a real binary |
 | `claude-plugin-validate` | no | `adapter:claude-validate-json` | baseline, strict (only with `[plugin]` or `[marketplace]`) | `claude plugin validate --json <stage>`; staged in the plugin layout (`skills/<name>/SKILL.md`, `agents/`, `commands/`); output shape checked against claude 2.1.285 |
 | `cisco-skill-scanner` | no | SARIF | strict | deterministic mode; its LLM, VirusTotal, AI Defense and OSV flags are deny-listed; not yet checked against a real binary |
-| `skillspector` | no | SARIF | none (opt-in) | NVIDIA SkillSpector in `--no-llm` mode, one skill per run (`batch_size = 1`); `--no-llm` is required in the command (`AR9E0` without it) and `--transitive`, `--mcp-registry` and `--mcp-registry-compare` are deny-listed; version range `>=2, <3`; output checked against SkillSpector 2.12.0 |
 | `snyk-agent-scan` | **yes** | `adapter:snyk-json` | none | needs `SNYK_TOKEN` (passed through to it); never part of a preset; the vendor documents receiving skill content, MCP server configuration and tool descriptions, and agent application details |
 
 A preset member is replaced by an entry with the same name or the same `profile`. `[[lint.external]]` with
 `profile = "<name>"` inherits the profile's command, format, inputs, egress declaration (it cannot declare
-less egress than the profile: `AR9E0`), severity map, flag deny-list, `batch_size`, `message_properties` and `version` range; keys set on
-the entry win. A profile can also name `required_flags`: a flag of its command (`--no-llm` for `skillspector`) that
-an egress = false entry must keep when it writes its own `command`, because dropping it switches on a network feature
-(`AR9E0`). A profile can also list the results its scanner reports only because a lookup was unreachable: with
-`egress = false` the `skillspector` profile drops SkillSpector's `SC4` "OSV.dev unreachable" notice, one per
-`requirements*.txt`, and keeps real `SC4` vulnerability findings. SkillSpector has no offline switch, so it still
-attempts that lookup, sending the package names, unless the network is blocked around it.
+less egress than the profile: `AR9E0`), severity map, flag deny-list, `batch_size` and `version` range; keys set on
+the entry win. An unknown `profile` fails the configuration load, and the error lists the valid names.
 `ai-rulez scanners list` shows the preset of each scanner.
 
 ### Long messages
@@ -1151,9 +1145,11 @@ entry lists the property paths to append, in order:
 
 ```toml
 [[lint.external]]
-name = "skillspector"
-profile = "skillspector"
-message_properties = ["evidence", "snippet"]   # the profile's default
+name = "my-scanner"
+command = ["my-scanner", "--format", "sarif", "{skill_dirs}"]
+format = "sarif"
+inputs = ["skills"]
+message_properties = ["evidence", "snippet"]
 ```
 
 The message becomes `PE3: Credential Access [evidence: cat ~/.aws/credentials; snippet: ...]`. A path is dotted
@@ -1162,7 +1158,7 @@ The message becomes `PE3: Credential Access [evidence: cat ~/.aws/credentials; s
 missing, empty or object-valued property is skipped. Values are sanitized like the message itself (escape and control
 characters removed, whitespace collapsed to single spaces, secret-shaped text masked) and the whole message stays
 within `max_message`, so a long snippet cuts the end. Paths are letters, digits, `_` and `-` joined by dots, at most
-16 per entry (`AR9E0` otherwise). The `skillspector` profile sets `["evidence", "snippet"]`; an entry's own list wins.
+16 per entry (`AR9E0` otherwise).
 A profile or entry with the JSON or adapter formats ignores the key.
 
 ```toml
@@ -1211,52 +1207,6 @@ The `timeout` of a run stays bounded: the runner never lets one command run long
 `[lint.scanner_policy] max_timeout` raises the 15 minute default ceiling, so a `timeout` written in an entry (or a
 pull request that edits one) cannot lift its own limit past what the policy allows. `scanners doctor` shows the effective
 timeout.
-
-### Recipe: single-path scanners (SkillSpector)
-
-Some scanners take exactly one input path: `skillspector scan INPUT_PATH` rejects a second argument. Pass
-`{skill_dirs}` with `batch_size = 1` so every run holds one skill. That also gives each skill its own timeout and
-cache entry, and a finding path such as `SKILL.md` or `references/x.md` resolves to the skill of its own run.
-The embedded profile does this for [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) (install it with
-`uv tool install skillspector`):
-
-```toml
-[[lint.external]]
-name = "skillspector"
-profile = "skillspector"
-# command, format, inputs, batch_size = 1 and version = ">=2, <3" come from the profile
-# severity_map = { "YR*" = "warning" }   # optional: demote the YARA rule matches
-```
-
-- **Egress.** Without `--no-llm` SkillSpector calls an LLM provider with skill content, so the profile declares
-  `egress = false`, keeps `--no-llm` in the command, and denies `--transitive` (follows external references),
-  `--mcp-registry` and `--mcp-registry-compare`. A `command` of your own that drops `--no-llm` is `AR9E0`, one that
-  adds a denied option is `AR9E4`. The scrubbed environment also hides provider credentials from it.
-- **OSV.dev lookups.** SkillSpector's `SC4` check queries OSV.dev for the dependencies of a `requirements*.txt` even
-  with `--no-llm`, and has no option to turn that off. It sends package names and versions, not file content. When
-  the lookup fails, as it does under network isolation, SkillSpector reports one low `SC4` result per file saying
-  "OSV.dev unreachable, using static fallback". Because the entry declares `egress = false`, ai-rulez drops exactly
-  those results (rule `SC4` and that message) and logs the count under `--debug`; an `SC4` finding about a
-  vulnerable package is never dropped. Setting `egress = true` on the entry keeps the notices.
-- **Exit codes.** SkillSpector exits 1 when it reports findings, 0 when clean and 2 on a usage error. With SARIF
-  output on stdout, ai-rulez reads the report whatever the exit code, so findings are results; a run that prints no
-  report is `AR9E3`. Use stdout, not `--output`: the file form adds a `Report saved to:` line to stdout.
-- **Severity.** The SARIF `level` is used as is. Static rules such as `P1`, `PE3`, `SC2` and `TM2` are `error`, so
-  `validate --external` exits 2 for them; `E1` is `warning`. Use `severity_map` (rule id glob to severity) or
-  `max_severity` to lower a noisy rule, and `fail_on` to choose what fails the run.
-- **Overlap.** The built-in checks (`AR004`, `AR005`, `AR036`) and SkillSpector can report the same line; both are
-  kept, each with its own code, and the scanner's carry `[skillspector]` and its rule id (`AR011`).
-- **Cost.** `batch_size = 1` starts one SkillSpector process per skill, and each start costs about 2 to 4 s of its own
-  CPU before it analyses a file, so a 400-skill repository takes many minutes on a cold run. Keep CI fast with the
-  [scan cache](#result-cache-and-dry-runs) (an unchanged skill is not scanned again) and `--changed` or `--since`
-  (only skills with a changed file run). Runs go one at a time by default; set `parallel = 4` on the entry (at most 16)
-  to run several skills at once. `--no-scan-cache` scans every selected skill again.
-- **Not in a preset.** The profile is opt-in. `strict` fails on warnings, and SkillSpector's regex and YARA
-  heuristics are noisier than the structural checks in `baseline` and `strict`, need a separate tool install, and
-  run once per skill; a project chooses that cost by adding the entry.
-
-The same shape fits any scanner with one path argument: `batch_size = 1`, `{skill_dirs}`, SARIF on stdout, and an
-`egress_flags` / `required_flags` pair in a profile for the options that reach the network.
 
 ### Failing on scanner findings
 
@@ -1434,8 +1384,8 @@ linted by `validate --strict` and `doctor`. The same checks run on any third-par
 
 | Code | Name | Default | Finds |
 | --- | --- | --- | --- |
-| AR9B0 | `okf-index-mismatch` | warning | An `index.md` entry points at a missing file, or a directory with an `index.md` has a concept or subdirectory it does not list |
-| AR9B1 | `okf-type-invalid` | error | Unparseable frontmatter, or a concept with no non-empty `type` (OKF conformance rules 1 and 2) |
+| AR9B0 | `okf-index-mismatch` | warning | An `index.md` entry points at a missing file, or a directory with an `index.md` has a concept or subdirectory it does not list; in a migrated configuration directory also an index that lists a title or description its concept no longer has (`ai-rulez generate` refreshes it) |
+| AR9B1 | `okf-type-invalid` | error | Unparseable frontmatter, or a concept with no non-empty `type` (OKF conformance rules 1 and 2); also an `x-ai-rulez` `kind` that is not `rules`, `context`, `skills`, `agents`, `commands`, `checks` or `skill-resource` (error, the message lists them), and, as a warning, a known `kind` that disagrees with the directory the concept sits in (a configuration directory classifies by directory and ignores the value) |
 | AR9B2 | `okf-link-broken` | warning | A markdown link in a concept does not resolve to a file in the bundle |
 | AR9B3 | `okf-version-invalid` | warning | Root `okf_version` is not `MAJOR.MINOR`; info when it is well formed but not `0.2`, and info when the root index uses the frontmatter style (the scheme OKF 0.2 does not describe); error from `okf validate` alone when the directory has no root `index.md` naming `okf_version` (it is not a bundle, and `import okf` refuses it too) |
 | AR9B4 | `okf-orphan` | info | A concept no index entry and no link reaches (only when the bundle has an index) |
@@ -1562,7 +1512,7 @@ does not override it; a rule that reports mild and serious cases at different le
 | AR015 | `secret-in-env-or-header` | error | A literal credential (not a `${VAR}` reference or placeholder) in an MCP server `env` value whose key names a secret, in an `Authorization`/`X-Api-Key`-style header, in a `--token`/`--api-key` argument or a URL query/userinfo, in the top-level `env` of `.claude/settings.json`, or in the headers of an `http` hook. A value shaped like a known credential is reported under any key. The finding names the key and never prints the value; the same checks apply to inline `mcpServers` in agent and skill frontmatter |
 | AR602 | `mcp-config-invalid` | error | A malformed MCP server definition in `config.toml`, the inline `mcpServers` of agent and skill frontmatter, `.mcp.json`, `.cursor/mcp.json` or `.vscode/mcp.json`: an empty server, a stdio server without `command`, an `http`/`sse` server without an absolute `url`, an unknown transport, `args`/`env`/`headers` of the wrong type, or a name defined twice in one file (case-insensitively). The deprecated SSE transport is a warning and a name outside letters, digits, `_` and `-` is info (Claude Code rewrites it in the `mcp__<server>__<tool>` names). A server in `.mcp.json`, `.cursor/mcp.json` or `.vscode/mcp.json` that `config.toml` also defines is a generated copy and is checked once, at its source. A non-loopback `http://` URL is reported by AR024 |
 | AR013 | `auto-invocation-danger` | warning | A skill or command the model can invoke by itself (no `disable-model-invocation: true`) that is allowed unrestricted `Bash` (`Bash`, `Bash(*)`; entries in `lint.security.allowed_tools` pass) and ships `scripts/`, or a subagent with `permissionMode: bypassPermissions`. Text the model reads could start such an item without a request from the user |
-| AR964 | `load-budget-exceeded` | warning | Content past a documented load limit of a configured harness, so the excess never reaches the model: a skill's `description` plus `when_to_use` over 1,536 characters (Claude Code skill listing), rules and context over 32 KiB together (Codex `AGENTS.md` chain, `project_doc_max_bytes`; info from 90%), a rule or context file over 12,000 characters (Windsurf/Devin workspace rules) or 500 lines (Cursor), and skill names and descriptions over 8,000 characters in total (Codex skill listing, info, since the real cap is about 2% of the context window). The limits live in one versioned table (`loadBudgets` in `internal/lint/ar_budget.go`) with the source URL and the date each figure was checked; the Codex skill-listing figure is not yet compared with the vendor page. The Agent Skills 500 lines and 5,000 tokens are enforced by AR901 and AR902 |
+| AR964 | `load-budget-exceeded` | warning | Content past a documented load limit of a configured harness, so the excess never reaches the model: a skill's `description` plus `when_to_use` over 1,536 characters (Claude Code skill listing), rules and context over 32 KiB together (Codex `AGENTS.md` chain, `project_doc_max_bytes`; info from 90%), a rule or context file over 12,000 characters (Windsurf/Devin workspace rules) or 500 lines (Cursor), and skill names and descriptions over 8,000 characters in total (Codex skill listing: warning past the limit, info from 90%; every skill the preset emits counts: authored, included, installed and the ones `scoped_fallback = "skill"` would write, and the message says how many come from includes or installed skills and how many are fallback skills, since the real cap is about 2% of the context window; the Codex rules-and-context total likewise includes included rules, and an included or installed skill over the Claude listing cap is reported on `config.toml`). The limits live in one versioned table (`loadBudgets` in `internal/lint/ar_budget.go`) with the source URL and the date each figure was checked; the Codex skill-listing figure is not yet compared with the vendor page. The Agent Skills 500 lines and 5,000 tokens are enforced by AR901 and AR902 |
 | AR210 | `import-invalid` | error | A Claude Code memory import (`@path/to/file.md`, `@./rel.md`) in a rule, context file, skill, agent or command whose file does not exist (looked up next to the file, in the skill directory, at the root and at the repository top). A circular chain and a chain of more than five hops (the depth Claude Code follows) are reported as warnings. Imports inside code spans and fenced blocks, `@~/...` and absolute paths (machine-dependent), e-mail addresses, `@scope/package` names and `@mentions` are ignored |
 | AR963 | `plugin-manifest-invalid` | error | A tracked `.claude-plugin/plugin.json` or `marketplace.json` that breaks the documented manifest schema: invalid JSON, a marketplace entry whose local `source` directory does not exist (relative to the marketplace root, or under `metadata.pluginRoot`), a missing or non-kebab-case `name`, a `version` that is not semver, `author`/`keywords` of the wrong type, component paths (`commands`, `agents`, `skills`, `hooks`, `mcpServers`, ...) that do not start with `./` or leave the plugin, a marketplace without `owner`, with a reserved name (`claude-code-marketplace`, `claude-plugins-official`, ...), with duplicate plugins or a bad `source`; unknown fields are warnings. `${CLAUDE_PLUGIN_ROOT}` left unquoted in a shell-form plugin hook command (a plugin path with a space splits it) is a warning. With `--external`, and when the `claude` binary is on `PATH`, `claude plugin validate <dir> --json` is also run for each plugin directory and its errors and warnings are merged (prefixed `claude plugin validate:`); without the binary this step is skipped silently |
 | AR014 | `exfil-command` | error | A network command (`curl`, `wget`, `nc`, `scp`, `rsync`, httpie, `iwr`) that sends a secret environment variable (`$API_KEY`, `$GITHUB_TOKEN`, `$DATABASE_URL`, names ending in `SECRET`, `TOKEN`, `PASSWORD`, ...), the environment (`env \| curl`, `$(printenv)`) or a credential file off the machine, and DNS exfiltration (`dig $(...)`). Read in prose, fenced shell and scripts, continuation lines joined. A secret used only in an authentication header is a warning (`-H "Authorization: Bearer $TOKEN"`); a line whose URLs are all in `lint.security.allowed_hosts` passes. Fenced shell and scripts are never suppressed by surrounding "never do this" text; an inline code span in prose is not reported when the line is a guardrail ("never run `env \| curl ...`") or a reviewer names it ("flag any skill that contains `printenv \| nc ...`") |
@@ -3317,23 +3267,23 @@ fields of an imported eval scenario that have no counterpart in the case format 
 
 ### AR9B0 okf-index-mismatch
 
-an OKF index.md lists a file that does not exist, or omits a concept or subdirectory of its directory
+an OKF index.md lists a file that does not exist, omits a concept or subdirectory of its directory, or (in a migrated configuration directory) lists a title or description its concept no longer has
 
 - Default severity: `warning`
 - Analyzer: `okf` (scope `item`)
 - Why: An OKF index that lists missing files, or omits existing ones, misleads every reader that navigates by it.
-- Bad: An index.md entry for a deleted concept
-- Good: Regenerate with `ai-rulez export okf`
+- Bad: An index.md entry for a deleted concept, or one still showing a skill's old description
+- Good: Run `ai-rulez generate` (the configuration directory) or `ai-rulez export okf` (an exported bundle)
 
 ### AR9B1 okf-type-invalid
 
-an OKF concept has unparseable frontmatter or a missing or empty type
+an OKF concept has unparseable frontmatter or a missing or empty type, or an x-ai-rulez kind that is unknown (error) or disagrees with its directory (warning)
 
 - Default severity: `error`
 - Analyzer: `okf` (scope `item`)
-- Why: An OKF concept without a parseable type cannot be classified.
-- Bad: A concept whose frontmatter has no `type`
-- Good: Give every concept a non-empty `type`
+- Why: An OKF concept without a parseable type, or with an x-ai-rulez kind that is not a content kind, cannot be classified; a kind that disagrees with the directory is ignored by the loader.
+- Bad: A concept whose frontmatter has no `type`, or `x-ai-rulez: {kind: bogus}`
+- Good: Give every concept a non-empty `type` and a kind from rules, context, skills, agents, commands, checks or skill-resource that matches its directory
 
 ### AR9B2 okf-link-broken
 

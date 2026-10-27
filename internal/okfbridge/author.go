@@ -96,9 +96,71 @@ func applyKeepingIdentity(it *sourceItem, md, prev *config.Metadata) {
 // before it is overwritten. It is what the source writers (add, remove, init,
 // the MCP tools) call after a change.
 func RefreshIndexes(ctx context.Context, configDir string) error {
-	tree, err := config.ScanContentTreeContext(ctx, configDir)
+	return RefreshIndexesFrom(ctx, configDir, nil)
+}
+
+// RefreshIndexesFrom is RefreshIndexes for a caller that has already loaded the
+// content: tree is the project's loaded content tree, from which the items read
+// from configDir are listed (items merged in from includes and builtins are left
+// out), so the tree is not scanned and parsed a second time. A nil tree is scanned.
+func RefreshIndexesFrom(ctx context.Context, configDir string, tree *config.ContentTree) error {
+	idx, items, err := indexInputs(ctx, configDir, tree)
 	if err != nil {
-		return oops.Wrapf(err, "read %s", configDir)
+		return err
+	}
+	if _, err := writeIndexes(configDir, idx, items, MigrateOptions{Write: true}); err != nil {
+		return err
+	}
+	return removeStaleIndexes(configDir, idx)
+}
+
+// IsBundleDir reports whether configDir is an OKF bundle that ai-rulez keeps
+// indexed: its root index.md is a generated listing. A directory without one, or
+// whose root index.md holds prose, is left to "migrate okf".
+func IsBundleDir(configDir string) bool {
+	data, err := os.ReadFile(filepath.Join(configDir, okf.IndexFile)) //nolint:gosec // G304: the project's own configuration directory
+	return err == nil && config.IsOKFListing(data)
+}
+
+// StaleIndexes lists the index.md files (slash paths relative to configDir) that
+// RefreshIndexes would rewrite: a listed title or description no longer matches
+// its concept, or an entry is missing. It is the index check "migrate okf
+// --check" runs, without writing anything.
+func StaleIndexes(ctx context.Context, configDir string) ([]string, error) {
+	return StaleIndexesFrom(ctx, configDir, nil)
+}
+
+// StaleIndexesFrom is StaleIndexes over an already loaded content tree, see
+// RefreshIndexesFrom. The index.md files themselves are still read from disk:
+// they are not content items.
+func StaleIndexesFrom(ctx context.Context, configDir string, tree *config.ContentTree) ([]string, error) {
+	idx, items, err := indexInputs(ctx, configDir, tree)
+	if err != nil {
+		return nil, err
+	}
+	changes, _, err := planIndexes(configDir, idx, items)
+	if err != nil {
+		return nil, err
+	}
+	var stale []string
+	for _, c := range changes {
+		if c.Action == ActionIndex {
+			stale = append(stale, c.Path)
+		}
+	}
+	return stale, nil
+}
+
+// indexInputs returns what the index.md files of configDir list, with the items
+// they were derived from. It lists the loaded tree when given one and scans
+// configDir otherwise.
+func indexInputs(ctx context.Context, configDir string, tree *config.ContentTree) ([]okf.IndexInput, []sourceItem, error) {
+	if tree == nil {
+		scanned, err := config.ScanContentTreeContext(ctx, configDir)
+		if err != nil {
+			return nil, nil, oops.Wrapf(err, "read %s", configDir)
+		}
+		tree = scanned
 	}
 	res := &ExportResult{Counts: map[Kind]int{}}
 	items := collectItems(tree, allKindSet(), configDir, res)
@@ -110,16 +172,13 @@ func RefreshIndexes(ctx context.Context, configDir string) error {
 		it.keepName = true
 		_, in, err := renderItem(it, claim)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		if len(in) > 0 {
 			idx = append(idx, in[:1]...)
 		}
 	}
-	if _, err := writeIndexes(configDir, idx, items, MigrateOptions{Write: true}); err != nil {
-		return err
-	}
-	return removeStaleIndexes(configDir, idx)
+	return idx, items, nil
 }
 
 // removeStaleIndexes deletes the generated index.md of content directories that

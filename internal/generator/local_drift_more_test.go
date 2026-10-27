@@ -13,6 +13,7 @@ import (
 
 	"github.com/Goldziher/ai-rulez/v5/internal/config"
 	"github.com/Goldziher/ai-rulez/v5/internal/gitutil"
+	"github.com/Goldziher/ai-rulez/v5/internal/lockfile"
 )
 
 const driftIgnoring = `version = "5.0"
@@ -205,7 +206,7 @@ func TestEscapeGitPattern_GitAgrees(t *testing.T) {
 	}, ignored)
 }
 
-func TestBaselineFailure_FailsClosedWithAndWithoutTheFlag(t *testing.T) {
+func TestBaselineFailure_FailsClosedEvenWhenDriftIsAllowed(t *testing.T) {
 	// Arrange: a profile that exists only in the overlay cannot be rendered as the
 	// shared baseline.
 	p := newDriftProject(t, driftIgnoring)
@@ -223,11 +224,56 @@ func TestBaselineFailure_FailsClosedWithAndWithoutTheFlag(t *testing.T) {
 	// Assert
 	require.Error(t, withoutFlag)
 	assert.Contains(t, withoutFlag.Error(), "shared baseline")
-	// The flag does not bypass a failed baseline: overlay-derived outputs could
-	// otherwise land in tracked files unmarked.
+	assert.Contains(t, withoutFlag.Error(), "--allow-local-drift")
+	// The flag waives the drift check, not the classification the baseline
+	// provides: without it overlay outputs would be written as shared (#507).
 	require.Error(t, withFlag)
 	assert.Contains(t, withFlag.Error(), "shared baseline")
 	assert.Contains(t, withFlag.Error(), "--no-local")
+	assert.NoFileExists(t, filepath.Join(p.base, ".git", "info", "exclude"))
+}
+
+func replacing(name string) map[string]any {
+	return map[string]any{"includes": []any{map[string]any{"name": name, "source": "./x"}}}
+}
+
+func TestBaselineLockPolicy_WaivesOnlyReplacedIncludes(t *testing.T) {
+	tests := []struct {
+		name         string
+		allow        bool
+		overlay      map[string]any
+		wantWaived   []string
+		wantInclude  string
+		wantUnwaived string
+	}{
+		{name: "flag off waives nothing", allow: false, overlay: replacing("core")},
+		{name: "no replaced include waives nothing", allow: true, overlay: map[string]any{"presets": []any{"codex"}}},
+		{
+			name: "replaced include is waived", allow: true,
+			overlay:    replacing("core"),
+			wantWaived: []string{"core"}, wantInclude: "core", wantUnwaived: "other",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			gen := NewGenerator(&config.Config{LocalOverlay: &config.LocalOverlay{Doc: tt.overlay}})
+			gen.SetAllowLocalDrift(tt.allow)
+
+			// Act
+			policy, waived := gen.baselineLockPolicy()
+
+			// Assert
+			assert.Equal(t, tt.wantWaived, waived)
+			if tt.wantInclude == "" {
+				assert.Nil(t, policy.Unenforced)
+				return
+			}
+			assert.True(t, policy.Waives(lockfile.KindInclude, tt.wantInclude))
+			assert.False(t, policy.Waives(lockfile.KindInclude, tt.wantUnwaived))
+			assert.False(t, policy.Waives(lockfile.KindSkill, tt.wantInclude))
+		})
+	}
 }
 
 func TestRedactCredentials(t *testing.T) {
@@ -469,4 +515,43 @@ func TestPlanLocal_PendingPatternsAreComputedFromThePlan(t *testing.T) {
 	assert.Same(t, plan, g.plan)
 	require.True(t, plan.machineLocal["AGENTS.md"])
 	assert.NotContains(t, g.pendingIgnorePatterns(merged), "AGENTS.md")
+}
+
+func TestExclude_ConcurrentSubProjectsKeepEveryBlock(t *testing.T) {
+	// Arrange: one repository, several projects generating at once, as the roots
+	// of a recursive run do.
+	const projects = 8
+	repo := t.TempDir()
+	top := &driftProject{base: repo}
+	top.git(t, "init", "-q")
+	cfgs := make([]*config.Config, projects)
+	for i := range projects {
+		p := subProject(t, repo, filepath.Join("pkg", string(rune('a'+i))), driftIgnoring)
+		p.overlay(t, "presets = [\"codex\"]\n")
+		cfgs[i] = p.load(t)
+	}
+
+	// Act
+	locks := NewExcludeLocks()
+	errs := make(chan error, projects)
+	start := make(chan struct{})
+	for _, cfg := range cfgs {
+		go func() {
+			<-start
+			gen := NewGenerator(cfg)
+			gen.SetExcludeLocks(locks)
+			errs <- gen.Generate("")
+		}()
+	}
+	close(start)
+	for range projects {
+		require.NoError(t, <-errs)
+	}
+
+	// Assert: no project's read-modify-write dropped another project's block.
+	exclude := readExclude(t, top)
+	assert.Equal(t, projects, strings.Count(exclude, "# BEGIN ai-rulez local: "), exclude)
+	for i := range projects {
+		assert.Contains(t, exclude, "/pkg/"+string(rune('a'+i))+"/AGENTS.md")
+	}
 }

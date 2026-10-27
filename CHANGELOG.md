@@ -6,6 +6,176 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
+## [5.8.0] - 2026-10-27
+
+### Added
+
+- **`[[enabled_plugins]]` enables a plugin from another marketplace for Claude Code, Codex and OpenCode from one
+  declaration.** `id = "basemind@basemind"` with an optional `marketplace = { name, source, type }` writes
+  `enabledPlugins` and `extraKnownMarketplaces` in `.claude/settings.json`, a `[plugins."<id>"]` table with
+  `enabled = true` in `.codex/config.toml`, and, with `opencode = "<npm package>"`, the package in the `plugin` array
+  of `opencode.json`. ai-rulez owns only the entries it writes, and `generate --user` writes the same entries to the
+  user's files. Ids, marketplace sources (`github`, `git`, `url`, `directory`; no `http://` or `git://`) and npm
+  packages are validated at load. An id that is also in `[claude.settings] disable_plugins`, a marketplace named
+  like the project's registered own `[marketplace]`, and a `directory` marketplace in the user config are errors;
+  an id also in `enable_plugins` is a warning. See `docs/plugins.md`
+  ([#500](https://github.com/Goldziher/ai-rulez/issues/500)).
+- **`Goldziher/ai-rulez/check@v5` runs the full governance gate in one step.** The sub-action installs the CLI with
+  the root action's resolve, cache and checksum-verified download scripts, then for every configuration root runs
+  `migrate okf --check`, `validate --strict --no-local`, `lock --check` (when a lock exists), `generate` and
+  `generate --check` with `--strict-config --no-local`, and optionally `verify --plugin` and `tokens --budget`.
+  Afterwards `git diff --exit-code HEAD` must be clean, no new untracked file may appear, and at least one tracked file
+  must be examined. Roots come from `config-directories` or from every tracked configuration;
+  `expected-config-count` fails a run that finds a different number. A job summary lists every command, the roots
+  checked and the files examined. Inputs: `version`, `config-directories`, `expected-config-count`, `plugin`,
+  `strict`, `local` and `token-budget` ([#505](https://github.com/Goldziher/ai-rulez/issues/505)).
+- **`Goldziher/ai-rulez/update@v5` keeps version-range pins current on a schedule.** It runs
+  `ai-rulez lock --outdated --format json` and stops with a notice when nothing is updatable; otherwise it runs
+  `ai-rulez update` (a pin the pre-pin scan refuses fails the job), `generate --no-local` and `lock --content-only`,
+  commits the result as `github-actions[bot]` and opens or refreshes a pull request from `ai-rulez/update` with the
+  outdated table in its body, or pushes to the checked-out branch with `direct: true`. The branch is replaced with
+  `--force-with-lease`, and the token reaches git and `gh` only through the environment. Inputs: `version`, `names`,
+  `kind`, `direct`, `branch`, `token` and `working-directory`; `min_release_age` stays a per-source configuration
+  setting because `update` has no flag for it ([#506](https://github.com/Goldziher/ai-rulez/issues/506)).
+- **MCP tools `lock_outdated`, `update_plan`, `update` and `lock_diff` mirror `lock --outdated`, `update --dry-run`,
+  `update` and `lock --diff`.** An agent maintaining an organization's governance could see that a lock was stale
+  (`lock_status`) but not which sources had newer tags, or move them, without the CLI. The tools run the same code as
+  the commands (now `internal/pinupdate`), so `update` keeps the pre-pin security scan and the refusals (`AR730`,
+  `AR731`, `AR732`, scan findings), returned as an error result that carries the update document and writes nothing.
+  The consents that override a refusal (`--accept-moved-tag`, `--accept-findings`, `--allow-downgrade`) are not tool
+  arguments. With `[mcp] read_only = true` only `lock_outdated`, `update_plan` and `lock_diff` are listed. The first
+  three read the remotes' tags over the network. See [Pin Tools](https://goldziher.github.io/ai-rulez/mcp-server/#pin-tools-lock_outdated-update_plan-update)
+  ([#502](https://github.com/Goldziher/ai-rulez/issues/502)).
+- **`[rules] scoped_fallback_group` folds the `scoped_fallback = "skill"` skills into fewer ones.** The fallback wrote
+  one `rule-<id>` skill per glob-scoped item, which pushed the Codex skill listing to 15,000-18,000 characters against
+  a budget of about 8,000 in repositories with shared modules. `include` writes one `scoped-<include>` skill per include
+  or builtin pack, `directory` one `scoped-<dir>` skill per directory the globs point into; a grouped skill holds each
+  item under a heading with its globs, its `paths` are their union and its description stays under 160 characters. The
+  default, `none`, leaves output unchanged
+  ([#503](https://github.com/Goldziher/ai-rulez/issues/503)).
+- **`fallback: false` in a rule or context frontmatter keeps a glob-scoped item out of the folderless-preset fallback.**
+  It is neither inlined into the shared `AGENTS.md` nor written as a skill, so only presets with path scoping render it.
+  `validate` rejects a value that is not a boolean (`AR304`)
+  ([#503](https://github.com/Goldziher/ai-rulez/issues/503)).
+
+### Changed
+
+- **Dependencies are upgraded and the GitHub Actions are pinned to major tags.** Go modules include oras-go
+  2.7.0, liter-llm 2.4.0 and tiktoken-go/tokenizer 0.10.0; the docs lockfile, pnpm 12.15.0 and golangci-lint
+  v2.15.0 are current. Workflow and action references use `@vN` (`actions/checkout@v7`), and setup-uv keeps a full
+  tag because it publishes no major tag.
+- **The floating `v5` action tag is now an annotated tag pushed with `--force-with-lease`.** After a stable
+  release publishes, the release workflow derives the tag from the release's major version (`v5.8.0` moves `v5`),
+  writes an annotated tag and pushes it with `--force-with-lease=refs/tags/v5:<previous>`, so a tag moved by anyone
+  else in between fails the push instead of being overwritten; the first push requires that the tag not exist.
+  Release candidates still never move it, and the no-rollback checks are unchanged. `uses: Goldziher/ai-rulez@v5`
+  with `version: latest` keeps a workflow on the newest 5.x action and CLI with no per-release edits
+  ([#504](https://github.com/Goldziher/ai-rulez/issues/504)).
+- **`AR964` counts the `scoped_fallback` skills in the Codex skill listing and warns past the limit.** The listing
+  total included only authored skills and was reported as info; it now adds the generated `rule-*`, `context-*` and
+  `scoped-*` skills, says how many of the listed skills they are, warns when the total exceeds the limit (so
+  `validate --strict` fails) and reports info from 90% of it
+  ([#503](https://github.com/Goldziher/ai-rulez/issues/503)).
+
+### Removed
+
+- **The `skillspector` scanner profile.** `profile = "skillspector"` in `[[lint.external]]` is no longer accepted: the configuration fails to load with `Value skillspector should be one of the allowed values: agnix, claude-plugin-validate, cisco-skill-scanner, snyk-agent-scan`. To keep running NVIDIA SkillSpector, declare the command in the entry yourself (`command = ["skillspector", "scan", "--no-llm", "--format", "sarif", "{skill_dirs}"]`, `format = "sarif"`, `inputs = ["skills"]`, `egress = false`, `batch_size = 1`, `version = ">=2, <3"`, `message_properties = ["evidence", "snippet"]`). The profile's `--no-llm` requirement, its `--transitive`, `--mcp-registry` and `--mcp-registry-compare` deny-list and its dropping of the `SC4` "OSV.dev unreachable" notice are not applied to such an entry, so keep `--no-llm` in the command yourself. The profile keys `required_flags` and `offline_notices`, and a profile-level default for `message_properties`, are gone with it; no other profile used them, and an entry's own `message_properties` still works. The `--competitors` run of `bench/judge` no longer compares against SkillSpector (`-skillspector-bin` is removed), and the SkillSpector test transcoder under `scripts/` is deleted. The checks and judge prompts derived from SkillSpector stay, with their Apache-2.0 notices.
+
+### Fixed
+
+- **The `update` sub-action also acts on sources that were never locked or whose locked tag is gone.** It counted only
+  `updatable` rows from `lock --outdated`, so a run with only `not-locked` or `tag-missing` sources reported nothing
+  to do although `ai-rulez update` pins them. Those rows now count, and the pull request body, job summary and commit
+  message list them with a Status column.
+- **`scoped_fallback` skill descriptions no longer split a multi-byte character.** Descriptions are cut at 160 or 250
+  bytes, and the cut could land inside a Cyrillic letter or an emoji in an item title, leaving invalid UTF-8 in the
+  `SKILL.md` frontmatter. The cut now falls on a character boundary.
+
+- **`schema/lock-outdated.schema.json` and `schema/update.schema.json` accept the `marketplace` and `plugin` kinds.**
+  `lock --outdated` and `update` report installed marketplaces and plugins that use a `version` constraint, but the
+  schemas listed only `include`, `skill` and `source`, so a validator rejected that output. The enums now match the
+  kinds `--kind` accepts.
+
+- **`--config .agents` loads a `source = "agents"` project.** Naming the `.agents` folder (or `.agents/.ai-rulez`)
+  failed with "path is outside the workspace" because the load workspace was rooted at `.agents` while the project
+  directory is its parent; it is now rooted at the project, as `--config .agents/ai-rulez.toml` and `--config
+  .ai-rulez` already were. The workspace still ends at the project, so a committed config cannot point outside it.
+
+- **`generate --recursive` builds a plugin-authoring root as a plugin bundle, and the default self MCP server is never
+  added to one.** A nested root such as `plugin/.ai-rulez/` that authors a plugin or marketplace and configures no
+  preset got a normal generate, which wrote `npx -y ai-rulez@latest mcp` into the shipped `.mcp.json` and
+  `.ai-rulez/.generated-manifest.local.json` and `.ai-rulez/local/` into its `.gitignore`, so `verify --plugin` failed.
+  The recursive run now generates such a root as `generate --plugin` does, `generate --check --recursive` skips it with
+  an info line (`verify --plugin` covers it), and a plugin-authoring root gets no self server whatever the mode
+  ([#498](https://github.com/Goldziher/ai-rulez/issues/498)).
+- **`[claude.settings] enable_plugins` and `disable_plugins` accept `name@marketplace` ids and no longer need a
+  `[marketplace]` for them.** A qualified id was rejected as "not a valid plugin name", and any `manage = true` block
+  failed with "needs a [marketplace] name" even when it listed only ids of another marketplace. Qualified ids are
+  written as given; bare names are still qualified with the local marketplace, which is registered only when one is
+  declared.
+- **The managed `.gitignore` block is the same on every machine and with or without `--no-local`.** It listed
+  `.ai-rulez/config.local.*` only while a `config.local.*` file existed, and the local manifest, the overlay-created
+  outputs (`CLAUDE.local.md`, a hook-only `.claude/settings.json`) and their `*.local.*` patterns only when the run
+  loaded local inputs, so each contributor's regeneration rewrote the committed file and `generate --check --no-local`
+  in CI reported drift that was not real. With `gitignore = true` the block now always lists `config.local.*` (and its
+  `.config.local.*` lock files), `local/` and the machine-local manifest, and never lists a path that only this
+  machine's local inputs add: those go to `.git/info/exclude`. With `gitignore = false`, a machine-local manifest that
+  is the only local file is excluded through `.git/info/exclude` too instead of creating a tracked `.gitignore`.
+  Directory outputs only the overlay adds (`.gemini/agents/` from an overlay `gemini` preset) are excluded as
+  `/dir/` patterns too; a directory the shared render also writes stays shared. Fixes #499.
+- **`generate --recursive` writes each root's patterns only to the `.gitignore` of its own git repository.** It put
+  every nested root's patterns into the `.gitignore` of the directory it ran in, even for a root with
+  `gitignore = false` and for a nested repository whose own `.gitignore` was never written. Each repository now gets
+  its own managed block holding the roots inside it, a nested directory with its own `.git` gets its own block, and a
+  repository whose roots all set `gitignore = false` is left alone. `generate --check --recursive` judges each block.
+  Fixes #497.
+- **Roots of one repository no longer drop each other's `.git/info/exclude` block in `generate --recursive`.** The
+  roots rewrote the shared exclude file concurrently, so one root's rewrite could remove another root's block (on
+  Windows the rename failed with "Access is denied"). The rewrites are now serialized.
+- **Built-in name tables match their upstream docs again.** Antigravity lists `/codesearch`, `/plan` and `/grill-me`
+  in its CLI reference table and no longer lists `/fast` or `/planning`, so the hand-kept groups for the first three
+  are folded into the generated one. Command Code adds `/btw`, Kimi Code `/import-sessions`, and Devin drops `/loop`
+  and makes `/rename-session` and `/title` aliases of `/rename`. The Claude Code extractor reads the built-in
+  subagents from bold headings as well as tabs, since the page dropped its tabs, and a `/design consent` subcommand row
+  no longer turns the bundled `/design` skill into a command ([#496](https://github.com/Goldziher/ai-rulez/issues/496)).
+- **A stale OKF `index.md` after a skill `description` edit is refreshed by `generate` and reported by `validate`
+  and `generate --check`.** The indexes of a migrated configuration directory were rewritten only by `add`,
+  `remove` and the MCP tools, so `migrate okf --check` alone went red on a commit every other check accepted.
+  `generate` now refreshes them, `validate` reports a stale one as `AR9B0` at its `index.md`, and
+  `generate --check` lists it as stale, all through the comparison `migrate okf --check` uses
+  ([#501](https://github.com/Goldziher/ai-rulez/issues/501)).
+- **`validate` no longer reads the `.ai-rulez.bak-okf-<timestamp>/` backup that `migrate okf` leaves.** Its copies
+  of the skills were reported as `AR701` and `AR703` duplicates of the real ones; any `.<name>.bak-*` directory is
+  now skipped ([#501](https://github.com/Goldziher/ai-rulez/issues/501)).
+- **`AR964` counts skills and rules from includes and installed skills in the load budgets.** The Codex
+  skill-listing and `AGENTS.md` chain totals summed only content authored under the config directory, so a project
+  whose skills come from `[[includes]]` (remote, local or a `config.local.toml` overlay) or from installed skills got
+  a figure far below what `generate` writes and Codex lists, or no finding. The totals now cover every item the
+  preset emits, the message says how many skills come from includes, and an included skill over the Claude listing
+  cap is reported on `config.toml` ([#508](https://github.com/Goldziher/ai-rulez/issues/508)).
+- **An unknown `x-ai-rulez.kind` in OKF frontmatter, or a kind that disagrees with the concept's directory, is now
+  reported.** `kind: bogus` in a `context/` concept passed `validate --strict` and `okf validate` with no findings and
+  was rendered as context, because a configuration directory classifies by directory and ignored the value. Both
+  commands (and the `okf_validate` tool) now report an unknown kind as an `AR9B1` error naming the allowed values
+  (`rules`, `context`, `skills`, `agents`, `commands`, `checks`, `skill-resource`) and a known kind that names another
+  directory, such as `kind: skill` under `context/`, as an `AR9B1` warning, which fails `--strict`
+  ([#509](https://github.com/Goldziher/ai-rulez/issues/509)).
+- **A local include honors `path`, and fails when it does not exist.** `path` was silently ignored for an include whose
+  `source` is a directory, so the source root was loaded instead of the subdirectory, also when `path` named a
+  directory that does not exist. The include now resolves `<source>/<path>` under the same containment and symlink
+  rules as `source`, fails with an error naming the include and the missing path (as a git include does), and refuses
+  a `path` that climbs out of the source with `..`. `validate`, the local-include pin in `ai-rulez.lock` (its path and
+  digest cover only the subdirectory) and `include add --path` follow the same rule
+  ([#510](https://github.com/Goldziher/ai-rulez/issues/510)).
+- **`generate --allow-local-drift` works when an overlay replaces an include whose lock entry is stale.** An overlay
+  that replaced a remote include with a local path could not be used while the shared config had a pending change for
+  that include (a new `ref` or `version` range): the shared baseline render ran against the stale lock and aborted.
+  With `--allow-local-drift` the baseline no longer enforces the lock for the includes the overlay replaces (their
+  content is replaced anyway) and logs a warning that the lock is stale for them; everything else stays enforced, so
+  machine-local outputs are still classified, excluded through `.git/info/exclude` and kept out of the shared
+  `.gitignore`. Any other baseline failure still fails the run, and without the flag the error stays, its hint naming
+  `--allow-local-drift` ([#507](https://github.com/Goldziher/ai-rulez/issues/507)).
+
 ## [5.7.0] - 2026-10-25
 
 ### Added

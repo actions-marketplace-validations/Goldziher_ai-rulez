@@ -1767,17 +1767,17 @@ directory entry (`!.claude/skills/`, `!/.claude/skills/`) is honored the same wa
 way, since `generate` leaves it alone; it still reports a machine-local or secret output a rule un-ignores, and says
 that `generate` will not re-ignore it.
 
-The machine-local manifest, `.ai-rulez/.generated-manifest.local.json`, is the one entry that is always written: it
-is ignored whenever it exists in a repository (and whenever a run writes it), even with `gitignore = false`, without
-adding `.ai-rulez/local/` or the overlay patterns.
+With `gitignore = true` the block is the same on every machine, whether or not `config.local.*` or `.ai-rulez/local/`
+exist and with or without `generate --no-local`: it always lists `.ai-rulez/config.local.*` with its
+`.config.local.*` lock and temp files, `.ai-rulez/local/` and `.ai-rulez/.generated-manifest.local.json`. A path that
+exists only because this machine's local inputs add it (`CLAUDE.local.md`, `AGENTS.local.md`, `GEMINI.local.md`,
+`AGENTS.override.md`, `<rulesdir>/*.local.*`, a `.claude/settings.json` that only the overlay's hooks create, local
+skills) is never listed: it is excluded through `.git/info/exclude`, which is not committed.
 
-Machine-local outputs and sources are **always** gitignored, even when `gitignore = false`; an entry is added
-when the file or directory exists, so a project without a `config.local.*` overlay or `.ai-rulez/local/` tree gets
-no line for it: the local outputs (`CLAUDE.local.md`, `AGENTS.local.md`, `GEMINI.local.md`, `AGENTS.override.md`,
-`<rulesdir>/*.local.*` including `ai-rulez.local.*`), the `.ai-rulez/local/` source tree, the
-`config.local.*` overlay with its `.config.local.*` lock and temp files, and
-`.ai-rulez/.generated-manifest.local.json`. Overlay-derived outputs whose names differ per machine are
-excluded through `.git/info/exclude` instead. See [Local Configuration](local-overrides.md).
+With `gitignore = false` the machine-local inputs that exist (the `config.local.*` overlay, the `.ai-rulez/local/`
+tree) are still gitignored in the project's `.gitignore`. The machine-local manifest alone does not make `generate`
+write a tracked `.gitignore`: it is excluded through `.git/info/exclude` instead. See
+[Local Configuration](local-overrides.md).
 
 `gitignore` defaults to `false`, so generated files are normally committed; set it to `true` when the team
 keeps generated output out of git and regenerates it locally.
@@ -2361,7 +2361,22 @@ in `.claude/settings.json`, merged like `mcpServers` (see
 ```toml
 [claude.settings]
 manage = true
-enable_plugins = ["acme-essentials"]
+enable_plugins = ["acme-essentials"]    # or a qualified "name@marketplace" of another marketplace
+```
+
+##### `enabled_plugins`
+
+Enables a plugin from another marketplace for the `claude`, `codex` and `opencode` presets from one entry:
+`.claude/settings.json` gets `enabledPlugins` (and `extraKnownMarketplaces` with `marketplace`), `.codex/config.toml`
+a `[plugins."<id>"]` table and `opencode.json` the `opencode` npm package in `plugin`. Merged like the other
+settings documents (see [Settings document merge behavior](#settings-document-merge-behavior)). See
+[Enable a plugin from another marketplace](plugins.md#enable-a-plugin-from-another-marketplace).
+
+```toml
+[[enabled_plugins]]
+id = "basemind@basemind"
+marketplace = { name = "basemind", source = "Goldziher/basemind", type = "github" }
+opencode = "basemind-opencode"
 ```
 
 ##### `claude.skills`
@@ -2748,6 +2763,7 @@ claude = "inline"
 - **`rules.mode`**: `split` (the default) writes one file per rule in the tool's native rules folder; `inline` embeds rules in the root file, moving only path-scoped rules to the folder.
 - **`rules.mode_by_preset`**: per-preset override that beats `rules.mode`. Keys are built-in, custom, or provider preset names.
 - **`rules.scoped_fallback`**: how the shared `AGENTS.md` (`agents_md = true`) serves glob-scoped rules and context to presets without a rules folder (`codex`, `opencode`, `pi`, ...). `inline` (the default) inlines them with an `_Applies to:_` line, so every preset that reads or imports `AGENTS.md` loads them at start; `skill` writes each one to `.agents/skills` as a skill gated by its `paths`. See [Rules](rules.md#glob-scoped-rules-and-agentsmd).
+- **`rules.scoped_fallback_group`**: with `scoped_fallback = "skill"`, folds the fallback skills so the skill listing stays short. `none` (the default) writes one skill per item; `include` writes one `scoped-<include>` skill per include or builtin pack; `directory` writes one `scoped-<dir>` skill per directory the globs point into. A grouped skill's `paths` are the union of its items' globs. A rule or context item with `fallback: false` in its frontmatter stays out of the fallback. See [Keeping the skill listing short](rules.md#keeping-the-skill-listing-short).
 - **`rules.baz_scoped`**: `nested` (the default) writes the path-scoped rules and context of the `baz` preset to the `AGENTS.md` of the directory their globs point into; `root` keeps them in the root `AGENTS.md`. See [Baz](baz.md).
 - **`rules.baz_default`**: `all` (the default) nests every path-scoped item into the Baz directory files; `none` nests only items whose `targets` select `baz`, leaving the rest in the root `AGENTS.md`.
 - **`rules.baz.include`**: with `baz_default = "none"`, the rule and context names (list) that are nested for Baz in addition to the items whose `targets` select `baz`; `baz: true` in an item's frontmatter does the same. A `!baz` entry in `targets` always keeps an item out of the Baz nested files. See [Baz](baz.md#per-rule-opt-in-and-opt-out).
@@ -4156,6 +4172,7 @@ activation: glob
 | `paths`       | list or string   | Files the rule applies to. `globs` is a synonym.                              |
 | `activation`  | string           | `always`, `glob`, `auto` or `manual`. Optional; derived when absent.          |
 | `description` | string           | What the rule is for. Required for `auto`; used by the model to decide.       |
+| `fallback`    | boolean          | `false` keeps a glob-scoped item out of the folderless-preset fallback (see [Glob-scoped rules and AGENTS.md](#glob-scoped-rules-and-agentsmd)). Default `true`. |
 
 `paths` and `globs` accept a YAML list or a comma-separated string (`"a/**, b/**"`). Commas inside braces (`*.{ts,tsx}`) or brackets do not split, and a backslash-escaped comma is kept. Entries are trimmed and deduplicated.
 
@@ -4294,6 +4311,33 @@ Presets with a rules folder keep their path-scoped files as before; Claude reads
 reads `AGENTS.md` also reads `.agents/skills` (for example not with `zcode`, which reads only `AGENTS.md`), and not in
 a [scope](monorepo.md#scoped-rule-files) run. An authored skill or command whose id is already `rule-<id>` keeps it,
 and the item is left out with a warning.
+
+###### Keeping the skill listing short
+
+Codex budgets the listing of all skill names and descriptions (about 8,000 characters when the context window is
+unknown), and a repository with many scoped rules can write dozens of `rule-<id>` skills. Two controls cut the count:
+
+```toml
+[rules]
+scoped_fallback = "skill"
+scoped_fallback_group = "directory"   # none (default) | include | directory
+```
+
+- `include` writes one `scoped-<include>` skill per include (or builtin pack, `scoped-builtin-<name>`) that
+  contributes scoped items. The project's own items keep one skill each.
+- `directory` writes one `scoped-<dir>` skill per directory the items' globs point into: the longest directory every
+  glob of an item starts below (`pkg/api/**/*.go` is `pkg/api`, `**/*.go` is the repository root, `scoped-root`).
+- A grouped skill holds each item under a `##` heading with its `_Applies to:_` globs, its `paths` are the union of
+  their globs, and its description is a short list of the item names (160 characters at most). A group with one item
+  keeps its own `rule-<id>` skill. Because `paths` is a union, any matching file loads the whole group; group by
+  `directory` when the items share a directory, and leave `none` when each rule should load alone.
+
+`fallback: false` in the frontmatter of a rule or context item keeps it out of the fallback altogether: it is neither
+inlined into the shared `AGENTS.md` nor written as a skill, so only presets with path scoping (`.claude/rules`,
+`.cursor/rules`, ...) render it. `validate` reports a value that is not a YAML boolean (`AR304`).
+
+`validate` (`AR964`) counts the fallback skills in the Codex skill listing, names how many of the skills they are, and
+warns when the listing exceeds the limit (`[lint.load_budgets] codex-skill-listing`), so `validate --strict` catches it.
 
 ##### Antigravity and Gemini
 
@@ -4809,8 +4853,8 @@ See [strict validation](strict-validation.md). AR9B0-AR9B9 are reserved for OKF.
 
 | Code | Name | Default | Finds |
 | --- | --- | --- | --- |
-| AR9B0 | `okf-index-mismatch` | warning | An `index.md` entry points at a missing file, or a directory with an `index.md` has a concept or subdirectory it does not list |
-| AR9B1 | `okf-type-invalid` | error | Unparseable frontmatter, or `type` missing or empty (conformance rules 1 and 2). Unknown type *values* are allowed by the spec and not reported |
+| AR9B0 | `okf-index-mismatch` | warning | An `index.md` entry points at a missing file, or a directory with an `index.md` has a concept or subdirectory it does not list; in a migrated configuration directory also an index that lists a title or description its concept no longer has (`ai-rulez generate` refreshes it) |
+| AR9B1 | `okf-type-invalid` | error | Unparseable frontmatter, or `type` missing or empty (conformance rules 1 and 2). Unknown type *values* are allowed by the spec and not reported. Also an `x-ai-rulez` `kind` that is not `rules`, `context`, `skills`, `agents`, `commands`, `checks` or `skill-resource` (an error naming the allowed values), and, as a warning, a known `kind` that disagrees with its directory: a configuration directory classifies by directory and ignores the value, so `validate --strict` and `okf validate --fail-on warning` fail on it rather than let it mislead |
 | AR9B2 | `okf-link-broken` | warning | A relative or bundle-relative markdown link whose target is not in the bundle (the spec tolerates these, so never an error by default) |
 | AR9B3 | `okf-version-invalid` | warning | Root `okf_version` is not `MAJOR.MINOR`; info when it is well formed but not `0.2`, and info when the root index uses the frontmatter style (the scheme OKF 0.2 does not describe); error from `okf validate` alone when the directory has no root `index.md` naming `okf_version` (it is not a bundle, and `import okf` refuses it too) |
 | AR9B4 | `okf-orphan` | info | A concept reachable from no index entry and no link (only checked when the bundle has an index) |
@@ -4962,7 +5006,13 @@ source file's frontmatter (the export normalizes them), and a source file that i
 - **Backup and atomic writes.** Every file is written atomically (a temporary file renamed over the target, mode kept),
   after the originals of the files it rewrites were copied to `<config dir>.bak-okf-<timestamp>/` (same relative paths;
   reported in the summary and as `backup_dir` in JSON). A run with nothing to rewrite takes no backup. `--dry-run` and
-  `--check` write nothing.
+  `--check` write nothing. The backup stays next to the configuration directory so you can restore a file by copying
+  it back, and `validate` skips every `.<name>.bak-*` directory, so its copies are never counted as duplicate
+  skills (`AR703`); delete it once you have reviewed the migration, or add it to `.gitignore`.
+- **Indexes follow the content.** `generate` refreshes the `index.md` files of a migrated configuration directory
+  (a root `index.md` that is a generated listing), so editing a skill's `description` and running `generate` is
+  enough. Before that, `validate` reports the stale index as `AR9B0` at its `index.md`, and `generate --check` lists
+  it as stale, so the checks agree with `migrate okf --check`.
 - **Symlinks.** A symlinked rule, context file or directory is never followed or rewritten. It is listed as
   `[skipped]` with the number in the summary, and the run exits 1 (also for a file whose frontmatter does not parse),
   because the file needs your hand: replace the link with the real file, or migrate its target. A `--dry-run` reports
@@ -6354,7 +6404,7 @@ jobs:
   generate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Generate
         env:
           AI_RULEZ_GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
@@ -6374,7 +6424,7 @@ generate:
 
 - **`name`**: Unique identifier for the include
 - **`source`**: Path or Git URL to the configuration
-- **`path`**: (Optional) Sub-path within the source to resolve (e.g. `modules/core`). Supports the bare/flattened layout described above; defaults to the source root
+- **`path`**: (Optional) Sub-path within the source to resolve (e.g. `modules/core`). Supports the bare/flattened layout described above; defaults to the source root. It applies to git and local sources alike: for a local `source` the include reads `<source>/<path>`, which must stay inside the project like `source` itself. A `path` that does not exist fails the load (it is not ignored), and `..` segments that leave the source are refused. `ai-rulez lock` pins a local include's `<source>/<path>` tree
 - **`ref`**: (Git only) Branch, tag, or commit SHA. Defaults to the remote's default branch (`HEAD`), not necessarily `main`.
 - **`version`**: (Git only) A semantic-version range such as `^1.2` or `~2.1.0`, resolved against the repository's tags and pinned in the lock; instead of `ref` (not both). `tag_prefix` and `include_prerelease` refine it, and `min_release_age = "7d"` holds back tags younger than that. Only `ai-rulez update` moves the pin. See [Version constraints](lockfile.md#version-constraints).
 - **`include`**: List of content types to fetch: `rules`, `context`, `skills`, `agents`, `commands`. MCP servers are not importable from an include.
@@ -7699,20 +7749,21 @@ instead of the local content. If local content exists but no `AGENTS.md` is prod
 
 ##### Bookkeeping
 
-- **Gitignore.** Local rule files share a folder with committed rules, so one pattern per folder is
-  written (for example `.claude/rules/*.local.*`) before the files themselves. The managed block also
-  lists `.ai-rulez/local/`, `.ai-rulez/config.local.*`, `.ai-rulez/.config.local.*` (lock and temp
-  files) and `.ai-rulez/.generated-manifest.local.json`.
+- **Gitignore.** With `gitignore = true` the managed block always lists `.ai-rulez/local/`,
+  `.ai-rulez/config.local.*`, `.ai-rulez/.config.local.*` (lock and temp files) and
+  `.ai-rulez/.generated-manifest.local.json`, whether or not they exist and with or without `--no-local`, so the
+  committed block is the same on every machine. The local outputs themselves are not in it (see below).
 - **Symlinked `.gitignore`.** Git does not read a `.gitignore` that is a symbolic link, and ai-rulez never
   writes through it: every ignore entry goes to a per-project block in `.git/info/exclude` instead.
 - **Fail closed.** `generate` stops, listing the paths, when a machine-local or secret-bearing output, the
   `config.local.*` overlay or the `local/` tree would not be git-ignored after the entries are written (for
   example because a `.gitignore` line such as `!.ai-rulez/local/` un-ignores it). Narrow the rule, or use
   `--no-local`.
-- **Per-clone excludes.** Local-only outputs whose names do not contain `.local.` (a local skill's
-  `SKILL.md`, `AGENTS.override.md`, an output of an overlay-defined preset) differ per machine. They are listed in a block of
+- **Per-clone excludes.** Every output the local inputs add (`CLAUDE.local.md`, `<rulesdir>/*.local.*`, a local skill's
+  `SKILL.md`, `AGENTS.override.md`, a `.claude/settings.json` only the overlay's hooks create, an output of an
+  overlay-defined preset) exists only on this machine. They are listed in a block of
   this project's `.git/info/exclude`, keyed by the project's config directory, so they stay out of the
-  shared `.gitignore`. Outside a git repository they fall back to the managed `.gitignore` block.
+  shared `.gitignore`, which would otherwise change with each contributor's local files. Outside a git repository they fall back to the managed `.gitignore` block.
   `clean`, or a run with no local inputs left, removes the block.
 - **Local manifest.** Local outputs are tracked in `.ai-rulez/.generated-manifest.local.json`, not in
   the committed manifest. A teammate's `generate` never deletes your local files; `clean` removes them
@@ -7925,7 +7976,14 @@ A run is **blocked** and exits non-zero, writing nothing, when:
 - a local-only file is tracked by git, or
 - git cannot answer which files are tracked (every candidate then counts as tracked).
 
-The error names paths only, never content. If the shared render itself fails, the run fails closed.
+The error names paths only, never content. If the shared render itself fails, the run fails closed: without it,
+overlay outputs could not be told apart from shared ones. The shared render fails, for example, when an overlay
+replaces a remote include with a local path while the shared config has a pending change for that include and
+`ai-rulez.lock` is stale. With `--allow-local-drift` the lock is not enforced for the includes the overlay replaces
+(their content is replaced anyway; a warning says the lock is stale for them), so you can try an include bump from a
+local checkout before the shared module is pushed and the lock updated. Machine-local outputs stay classified,
+excluded and out of the shared `.gitignore`. Any other shared render failure still fails the run; fix the shared
+config, run `ai-rulez lock`, or use `--no-local`.
 
 Ways forward:
 
@@ -8511,11 +8569,19 @@ backend = ["api", "database"]
 
 By combining domain organization with thoughtful profile design, you can create scalable, maintainable configurations that grow with your project.
 
+##### Plugin-authoring roots
+
+A nested root that only builds a plugin (it declares `[plugin]` or plugin definitions and no preset, for example
+`plugin/.ai-rulez/`) is built as a bundle by `generate --recursive`, as `generate --plugin` would in that root, and is
+skipped by `generate --check --recursive`; use `verify --plugin` for it. See [Plugins](plugins.md).
+
 ##### The shared `.gitignore` block
 
-With `gitignore = true`, a recursive run writes one managed block at the git toplevel holding every root's patterns
-(`svc/CLAUDE.md`, `svc/.claude/skills/`, ...), and `generate --recursive --check` verifies that block once after the
-last root. The root's own entries are unanchored (`AGENTS.md`, `CLAUDE.md`), so they also match the file of every nested
+With `gitignore = true`, a recursive run writes one managed block at the toplevel of each git repository, holding the
+patterns of the roots inside it (`svc/CLAUDE.md`, `svc/.claude/skills/`, ...), and `generate --recursive --check`
+verifies each block once after the last root. A root's patterns go only to the `.gitignore` of its own repository: a
+nested directory with its own `.git` gets its own block, and a repository whose root sets `gitignore = false` never has
+its `.gitignore` written for other roots, which matters for a parent checkout holding several independent repositories. The root's own entries are unanchored (`AGENTS.md`, `CLAUDE.md`), so they also match the file of every nested
 root. To commit generated files instead, list them in each root's [`gitignore_exclude`](configuration.md#gitignore_exclude);
 a root applies its list to its own outputs, so a project that commits everything repeats
 `gitignore_exclude = ["**/AGENTS.md", "**/CLAUDE.md", ".claude/"]` in each config. When the block hides a file git
@@ -9068,6 +9134,10 @@ user-level table is in [User-level configuration](user-scope.md#where-things-go)
   `.codex/config.toml`, `.qwen/settings.json`, ...) are merged, not replaced. ai-rulez owns the keys, array
   elements and map members it writes, and comments in JSONC, TOML and YAML survive. See
   [Settings document merge behavior](configuration.md#settings-document-merge-behavior).
+- **External plugins.** `[[enabled_plugins]]` enables one plugin from another marketplace for `claude`
+  (`enabledPlugins`, `extraKnownMarketplaces`), `codex` (`[plugins."<id>"]`) and `opencode` (the `plugin` npm
+  array). The other presets have no equivalent and skip it. See
+  [Enable a plugin from another marketplace](plugins.md#enable-a-plugin-from-another-marketplace).
 - **Native MCP environment references.** Where the harness expands `${VAR}`-style references itself, the
   reference is written instead of the secret. See
   [Environment references](configuration.md#mcp_servers).
@@ -10160,6 +10230,7 @@ A [role](roles.md)'s `skill_mode` is rendered through the same ownership: `gener
 | File | Written when | On `clean` |
 | ---- | ------------ | ---------- |
 | `.claude/settings.json` | plugin keys, `[[hooks]]`, `[permissions]` or managed keys are declared (MCP servers are not: Claude Code reads them from `.mcp.json`) | only the entries ai-rulez wrote are removed; the file is deleted only if nothing else is left |
+| `.claude/settings.json`, `.codex/config.toml`, `opencode.json` | `[[enabled_plugins]]` are declared: `enabledPlugins` and `extraKnownMarketplaces`, `[plugins."<id>"]` tables, and the `plugin` array (see [Enable a plugin from another marketplace](plugins.md#enable-a-plugin-from-another-marketplace)) | same; only the entries ai-rulez wrote are removed |
 | `.codex/hooks.json`, `.cursor/hooks.json`, `.gemini/settings.json` | `[[hooks]]` apply to the harness | same |
 | `.opencode/plugins/ai-rulez-hooks.js`, `.kilo/plugins/ai-rulez-hooks.js`, `.mimocode/plugins/ai-rulez-hooks.js`, `.pi/extensions/ai-rulez-hooks.ts`, `.amp/plugins/ai-rulez-hooks.ts` | `[[hooks]]` apply to the harness | deleted (ai-rulez owns the whole module; the directory also holds hand-written plugins, which are left alone) |
 | `.factory/hooks.json`, `.agents/hooks.json`, `.devin/hooks.v1.json`, `.gitlab/duo/hooks.json`, `.grok/hooks/ai-rulez.json`, `.kiro/hooks/ai-rulez.json`, `.deepagents/hooks.json`, `.agents/plugins/ai-rulez/hooks/hooks.json`, `.vibe/hooks.toml` | `[[hooks]]` apply to the harness | only the hooks ai-rulez wrote are removed; the file goes when nothing else is in it |
@@ -12098,6 +12169,14 @@ parallel. Standalone `[plugin]` producers are still processed individually.
 Consumer-only `[[plugins]]` and `[[marketplaces]]` declarations are skipped.
 `--if-configured` does not suppress generation or verification errors.
 
+A plugin-authoring root is one that authors a plugin or marketplace (a `[plugin]` block, `[[plugins_authoring]]`,
+`[[marketplaces_authoring]]` or a marketplace with members, inline or from a `config.<name>.toml` layer) and configures
+no preset. It exists to build a bundle, so a plain `generate --recursive` builds it in plugin mode, the same output as
+`generate --plugin` in that root, instead of writing harness files and `.gitignore` entries into the shipped tree.
+`generate --check --recursive` skips such a root with an info line; check its bundle with `verify --plugin`. The
+`ai-rulez` MCP server that generation adds by default is never added to a plugin-authoring root, whatever the mode. A
+root that keeps a preset generates normally, and builds its bundle with `generate --plugin`.
+
 See [Poly Hooks](poly-hooks.md) to add non-mutating plugin verification to a
 repository's pre-commit stage.
 
@@ -12558,6 +12637,54 @@ root relative to the repository (`"./tools/acme-marketplace"`); Claude Code reso
 main checkout. `extraKnownMarketplaces` takes effect only after the user trusts the folder.
 Relative-path plugins listed in `enabledPlugins` load from the marketplace without an install
 step; the key cannot force an install of a plugin from an external source.
+
+`enable_plugins` and `disable_plugins` take either a bare plugin name, qualified with the `[marketplace]`
+name as above, or a fully qualified `name@marketplace` id, which is written as given. A block that lists
+only qualified ids needs no `[marketplace]` and registers no local marketplace; set
+`register_marketplace = true` explicitly to require one. To enable a plugin from another marketplace for
+more than Claude Code, use `[[enabled_plugins]]`.
+
+##### Enable a plugin from another marketplace
+
+`[[enabled_plugins]]` switches on a plugin this project does not author, for the Claude Code, Codex and
+OpenCode presets, from one declaration:
+
+```toml
+[[enabled_plugins]]
+id = "basemind@basemind"                    # <name>@<marketplace>, required
+marketplace = { name = "basemind", source = "Goldziher/basemind", type = "github" }   # optional
+opencode = "basemind-opencode"              # optional npm package for OpenCode
+```
+
+| Preset | File | Written |
+| ------ | ---- | ------- |
+| `claude` | `.claude/settings.json` | `enabledPlugins."<id>": true`, and with `marketplace` `extraKnownMarketplaces.<name>` with the source in Claude Code's own shape (`{"source": "github", "repo": "Goldziher/basemind"}`) |
+| `codex` | `.codex/config.toml` | `[plugins."<id>"]` with `enabled = true` |
+| `opencode` | `opencode.json` | the `opencode` package appended to `plugin`, only when `opencode` is set |
+
+`marketplace.type` is `github` (`source` is `owner/repo`), `git` (an `https://` or `ssh://` URL, or
+`git@host:path`), `url` (an `https://` URL) or `directory` (a project-relative path); `ref` pins a branch or
+tag of a `github` or `git` source. `marketplace.name` must equal the marketplace part of `id`, and two
+entries that name the same marketplace must agree on its source. Leave `marketplace` out when the harness
+already knows it. `id`, the marketplace fields and the npm package are validated at load against allowlisted
+formats; `http://` and `git://` sources are rejected. `generate` lists the marketplace registration, the
+plugin and the npm package as commands to acknowledge, like hooks.
+
+Only the entries written here are owned, with the machinery of the other settings files: every other key,
+marketplace, plugin and `plugin` element in the files survives, an entry dropped from the config is removed
+on the next `generate`, `clean` removes what was written, and a value you already had stays yours. The
+declaration needs no `[claude.settings] manage`. With `generate --user` the same entries land in the user's
+`~/.claude/settings.json`, `~/.codex/config.toml` and OpenCode config. Presets other than these three have no
+equivalent and skip the declaration; `generate` warns when none of the three is active. Claude Code still asks
+the user to trust the marketplace folder, and `enabledPlugins` cannot install a plugin Claude Code has not
+fetched.
+
+Conflicts are rejected at load. An id in `[[enabled_plugins]]` and in `[claude.settings] disable_plugins` is an
+error (bare names are compared as `<name>@<marketplace>` with the project's own `[marketplace]`); an id also in
+`enable_plugins` is redundant and warned about. A `marketplace` whose `name` is the project's own
+`[marketplace].name`, while `[claude.settings]` registers it, is an error because it would replace that
+registration: leave `marketplace` out of the entry. In the user config (`generate --user`) a `directory`
+marketplace is an error, since its path is relative to a project; use `github`, `git` or `url`.
 
 ##### Catalog skill
 
@@ -13374,13 +13501,25 @@ Windows archives that need `liter_llm_ffi.dll` retain it beside the executable.
 
 These are two independent choices:
 
-- `uses: Goldziher/ai-rulez@v5` selects the action implementation from the floating **v5 tag**.
-  The publish workflow moves it to the commit of each successfully published stable v5 release,
-  after GitHub, npm, PyPI and Homebrew publication. Release candidates never move it, and rerunning
-  an older release cannot move it backward.
-- `with: version: 5.7.0` selects the **CLI binary**. Accepts `X.Y.Z`, `vX.Y.Z`, or `latest`
-  (the default). `version: v5` is unsupported: the floating tag is an action ref, not a binary release.
-  Omitting `version` downloads the latest public GitHub release, even when the action ref is pinned.
+- `uses: Goldziher/ai-rulez@v5` selects the action implementation from the floating **v5 tag**,
+  an annotated tag that the publish workflow moves to the commit of each successfully published
+  stable 5.x release, after GitHub, npm, PyPI and Homebrew publication. The tag is derived from
+  the release's major version. Release candidates never move it, and rerunning an older release
+  cannot move it backward.
+- `with: version: 5.8.0` selects the **CLI binary**. Accepts `X.Y.Z`, `vX.Y.Z`, a release
+  candidate `X.Y.Z-rc.N`, or `latest` (the default). `latest` follows GitHub's
+  `releases/latest` redirect, which names the newest published stable release (never a draft or a
+  release candidate), and the download is then checked against that release's `checksums.txt`.
+  `version: v5` is unsupported: the floating tag is an action ref, not a binary release. Omitting
+  `version` downloads the latest release, even when the action ref is pinned.
+
+To follow every 5.x release with no per-release edits, combine the two floating choices:
+
+```yaml
+- uses: Goldziher/ai-rulez@v5
+  with:
+    version: latest
+```
 
 Pin a reviewed full release tag or commit SHA for reproducible action code, and set `version` too
 for a reproducible binary. `@v5` intentionally receives compatible action updates; `latest` may
@@ -13401,7 +13540,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: Goldziher/ai-rulez@v5
         with:
-          version: 5.7.0
+          version: 5.8.0
       - run: ai-rulez generate --check
       - run: ai-rulez validate --strict
       - run: ai-rulez lock --check
@@ -13410,6 +13549,117 @@ jobs:
 See [lock checks in CI](lockfile.md#ci-usage) for the distinction between lock drift and generated
 output drift. Command arguments, including `--config`, `--profile`, `--format` and judge-specific
 flags, belong on the following `run:` command. The action does not interpret or execute an argument string.
+
+#### Governance gate: `check`
+
+`Goldziher/ai-rulez/check@v5` installs the CLI the same way as the root action (the same
+resolve, cache and checksum-verified download scripts) and runs the full gate, so a workflow does
+not have to assemble it from single commands:
+
+```yaml
+name: ai-rulez
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Goldziher/ai-rulez/check@v5
+        with:
+          version: 5.8.0
+          expected-config-count: "2" # the root and one module
+```
+
+For every configuration root, in order, it runs:
+
+1. `ai-rulez migrate okf --check` (skipped for a `source = "agents"` project, which has no
+   `.ai-rulez` content tree to convert);
+2. `ai-rulez validate --strict --no-local`;
+3. `ai-rulez lock --check`, when the root has an `ai-rulez.lock`;
+4. `ai-rulez generate --strict-config --no-local`, then `ai-rulez generate --check --strict-config --no-local`;
+5. `ai-rulez verify --plugin` with `plugin: true`, and `ai-rulez tokens --budget N --no-local` with
+   `token-budget: N`.
+
+Then `git diff --exit-code HEAD` must be clean and generation must have left no new untracked file.
+The gate fails when the checkout has no tracked files, so an empty or wrong checkout cannot pass. It
+stops at the first failing command and writes a job summary listing every command with its result,
+the number of roots checked and the number of tracked files examined.
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `version` | `latest` | CLI version, as for the root action |
+| `config-directories` | discover | Newline-separated configuration directories (`.ai-rulez`, `.agents`, `.config/ai-rulez`, or the project root holding one), relative to the workspace. Empty discovers every **tracked** `.ai-rulez/config.toml`, `.config/ai-rulez/config.toml` and `.agents/ai-rulez.toml` |
+| `expected-config-count` | none | Fail unless exactly this many roots are checked, so a renamed or deleted module fails instead of silently checking fewer roots |
+| `plugin` | `false` | Also run `verify --plugin` |
+| `strict` | `true` | `false` drops `--strict` from `validate` and `--strict-config` from `generate` |
+| `local` | `false` | `true` reads the machine-local overlay; `false` passes `--no-local` |
+| `token-budget` | none | Run `tokens --budget N`: fail when the always-loaded token count exceeds `N` |
+
+Booleans accept only `true` or `false`, counts only positive integers, and directories only
+relative paths without `..`. Outputs: `version`, `roots` (the number checked) and
+`files-examined`. Each command runs in its project root with configuration discovery, as a local
+run there would. `tokens --budget` is a single ceiling on the headline always-loaded count; a
+per-harness budget (`claude=N,codex=N`) and the MCP tool-schema cost are not measured.
+
+#### Scheduled pin updates: `update`
+
+`ai-rulez update` moves version-range pins (`version = "^1.2"`) of includes, installed skills,
+skill sources, marketplaces and plugins, and nothing runs it on its own; Dependabot and Renovate do
+not read `ai-rulez.lock`. `Goldziher/ai-rulez/update@v5` runs it on a schedule:
+
+```yaml
+name: ai-rulez update
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Goldziher/ai-rulez/update@v5
+        with:
+          version: 5.8.0
+```
+
+In order, it:
+
+1. runs `ai-rulez lock --outdated --format json` and stops with a notice (`updated: false`) when no
+   source has an update its constraint allows;
+2. runs `ai-rulez update`. The pre-pin security scan applies: a refused source fails the job with
+   its `AR` code and nothing is committed;
+3. runs `ai-rulez generate --no-local`, then `ai-rulez lock --content-only`;
+4. commits every change in the project as `github-actions[bot]` and, by default, pushes it to
+   `branch` and opens a pull request into the checked-out branch, or refreshes the open one. The
+   PR body holds the outdated table (kind, name, source, locked tag, new tag). With `direct: true`
+   it pushes the commit to the checked-out branch instead, with the same list in the commit message.
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `version` | `latest` | CLI version, as for the root action |
+| `names` | all | Sources to update, separated by spaces or newlines (passed to `lock --outdated` and `update`) |
+| `kind` | all | `include`, `skill`, `source`, `marketplace` or `plugin` |
+| `direct` | `false` | `true` pushes to the checked-out branch instead of opening a pull request |
+| `branch` | `ai-rulez/update` | Pull request branch. The action owns it: each run replaces it with `--force-with-lease` from the value it read, so a push by someone else in between fails the run instead of being lost |
+| `token` | `github.token` | Token for `git push` and `gh`. It reaches git through `GIT_CONFIG_*` environment variables and `gh` through `GH_TOKEN`, never the command line or a file. When `GITHUB_TOKEN` is unset it is also exported as `GITHUB_TOKEN`, which `ai-rulez` uses only for github.com release dates (`min_release_age`) |
+| `working-directory` | `.` | Project root holding the configuration, relative to the workspace |
+
+Outputs: `version`, `updated` (`true` when a commit was pushed), `commit` and
+`pull-request-url`. The job needs `contents: write`, and `pull-requests: write` for the pull
+request mode. The checkout must be on a branch (not detached) with no uncommitted changes. A
+pull request opened with the default `GITHUB_TOKEN` does not start other workflows; pass a GitHub
+App or fine-grained token as `token` when the pull request must run CI. There is no
+`min-release-age` input: `ai-rulez update` has no such flag, and each source's `min_release_age`
+in the configuration already holds back tags that are too new (`AR733`).
 
 #### LLM configuration inputs
 
@@ -13456,7 +13706,7 @@ steps:
       fetch-depth: 2
   - uses: Goldziher/ai-rulez@v5
     with:
-      version: 5.7.0
+      version: 5.8.0
       llm-provider: openai
       llm-model: gpt-4o-mini
       llm-api-key-env: OPENAI_API_KEY
@@ -13482,7 +13732,7 @@ diagnostic requires a project; `llm estimate` can run without one.
 ```yaml
 - uses: Goldziher/ai-rulez@v5
   with:
-    version: 5.7.0
+    version: 5.8.0
 - name: Inspect LLM configuration without a request
   env:
     AI_RULEZ_LLM_PROVIDER: openai
@@ -14073,7 +14323,7 @@ env_pass = []                      # extra environment variable names for an egr
 # fail_on = "error"                # lowest severity of this scanner's findings that fails the run
 # cache_files = ["tools/**/*.py"]  # files the scanner reads; part of the result cache key (a script run through python3, node, sh... is hashed anyway)
 # max_message = 1000               # characters of a finding message kept in text output (default 500)
-# message_properties = ["evidence", "snippet"]   # SARIF result properties appended to the message (skillspector sets these)
+# message_properties = ["evidence", "snippet"]   # SARIF result properties appended to the message
 
 [lint.scanner_policy]
 preset = "strict"                  # off (default) | baseline | strict: embedded profiles that run with --external
@@ -14633,18 +14883,12 @@ installed; a scanner that is not on `PATH` is an `AR9E2` notice.
 | `agnix` | no | SARIF | baseline, strict | `agnix --format sarif <stage>`; not yet checked against a real binary |
 | `claude-plugin-validate` | no | `adapter:claude-validate-json` | baseline, strict (only with `[plugin]` or `[marketplace]`) | `claude plugin validate --json <stage>`; staged in the plugin layout (`skills/<name>/SKILL.md`, `agents/`, `commands/`); output shape checked against claude 2.1.285 |
 | `cisco-skill-scanner` | no | SARIF | strict | deterministic mode; its LLM, VirusTotal, AI Defense and OSV flags are deny-listed; not yet checked against a real binary |
-| `skillspector` | no | SARIF | none (opt-in) | NVIDIA SkillSpector in `--no-llm` mode, one skill per run (`batch_size = 1`); `--no-llm` is required in the command (`AR9E0` without it) and `--transitive`, `--mcp-registry` and `--mcp-registry-compare` are deny-listed; version range `>=2, <3`; output checked against SkillSpector 2.12.0 |
 | `snyk-agent-scan` | **yes** | `adapter:snyk-json` | none | needs `SNYK_TOKEN` (passed through to it); never part of a preset; the vendor documents receiving skill content, MCP server configuration and tool descriptions, and agent application details |
 
 A preset member is replaced by an entry with the same name or the same `profile`. `[[lint.external]]` with
 `profile = "<name>"` inherits the profile's command, format, inputs, egress declaration (it cannot declare
-less egress than the profile: `AR9E0`), severity map, flag deny-list, `batch_size`, `message_properties` and `version` range; keys set on
-the entry win. A profile can also name `required_flags`: a flag of its command (`--no-llm` for `skillspector`) that
-an egress = false entry must keep when it writes its own `command`, because dropping it switches on a network feature
-(`AR9E0`). A profile can also list the results its scanner reports only because a lookup was unreachable: with
-`egress = false` the `skillspector` profile drops SkillSpector's `SC4` "OSV.dev unreachable" notice, one per
-`requirements*.txt`, and keeps real `SC4` vulnerability findings. SkillSpector has no offline switch, so it still
-attempts that lookup, sending the package names, unless the network is blocked around it.
+less egress than the profile: `AR9E0`), severity map, flag deny-list, `batch_size` and `version` range; keys set on
+the entry win. An unknown `profile` fails the configuration load, and the error lists the valid names.
 `ai-rulez scanners list` shows the preset of each scanner.
 
 ##### Long messages
@@ -14663,9 +14907,11 @@ entry lists the property paths to append, in order:
 
 ```toml
 [[lint.external]]
-name = "skillspector"
-profile = "skillspector"
-message_properties = ["evidence", "snippet"]   # the profile's default
+name = "my-scanner"
+command = ["my-scanner", "--format", "sarif", "{skill_dirs}"]
+format = "sarif"
+inputs = ["skills"]
+message_properties = ["evidence", "snippet"]
 ```
 
 The message becomes `PE3: Credential Access [evidence: cat ~/.aws/credentials; snippet: ...]`. A path is dotted
@@ -14674,7 +14920,7 @@ The message becomes `PE3: Credential Access [evidence: cat ~/.aws/credentials; s
 missing, empty or object-valued property is skipped. Values are sanitized like the message itself (escape and control
 characters removed, whitespace collapsed to single spaces, secret-shaped text masked) and the whole message stays
 within `max_message`, so a long snippet cuts the end. Paths are letters, digits, `_` and `-` joined by dots, at most
-16 per entry (`AR9E0` otherwise). The `skillspector` profile sets `["evidence", "snippet"]`; an entry's own list wins.
+16 per entry (`AR9E0` otherwise).
 A profile or entry with the JSON or adapter formats ignores the key.
 
 ```toml
@@ -14723,52 +14969,6 @@ The `timeout` of a run stays bounded: the runner never lets one command run long
 `[lint.scanner_policy] max_timeout` raises the 15 minute default ceiling, so a `timeout` written in an entry (or a
 pull request that edits one) cannot lift its own limit past what the policy allows. `scanners doctor` shows the effective
 timeout.
-
-##### Recipe: single-path scanners (SkillSpector)
-
-Some scanners take exactly one input path: `skillspector scan INPUT_PATH` rejects a second argument. Pass
-`{skill_dirs}` with `batch_size = 1` so every run holds one skill. That also gives each skill its own timeout and
-cache entry, and a finding path such as `SKILL.md` or `references/x.md` resolves to the skill of its own run.
-The embedded profile does this for [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) (install it with
-`uv tool install skillspector`):
-
-```toml
-[[lint.external]]
-name = "skillspector"
-profile = "skillspector"
-# command, format, inputs, batch_size = 1 and version = ">=2, <3" come from the profile
-# severity_map = { "YR*" = "warning" }   # optional: demote the YARA rule matches
-```
-
-- **Egress.** Without `--no-llm` SkillSpector calls an LLM provider with skill content, so the profile declares
-  `egress = false`, keeps `--no-llm` in the command, and denies `--transitive` (follows external references),
-  `--mcp-registry` and `--mcp-registry-compare`. A `command` of your own that drops `--no-llm` is `AR9E0`, one that
-  adds a denied option is `AR9E4`. The scrubbed environment also hides provider credentials from it.
-- **OSV.dev lookups.** SkillSpector's `SC4` check queries OSV.dev for the dependencies of a `requirements*.txt` even
-  with `--no-llm`, and has no option to turn that off. It sends package names and versions, not file content. When
-  the lookup fails, as it does under network isolation, SkillSpector reports one low `SC4` result per file saying
-  "OSV.dev unreachable, using static fallback". Because the entry declares `egress = false`, ai-rulez drops exactly
-  those results (rule `SC4` and that message) and logs the count under `--debug`; an `SC4` finding about a
-  vulnerable package is never dropped. Setting `egress = true` on the entry keeps the notices.
-- **Exit codes.** SkillSpector exits 1 when it reports findings, 0 when clean and 2 on a usage error. With SARIF
-  output on stdout, ai-rulez reads the report whatever the exit code, so findings are results; a run that prints no
-  report is `AR9E3`. Use stdout, not `--output`: the file form adds a `Report saved to:` line to stdout.
-- **Severity.** The SARIF `level` is used as is. Static rules such as `P1`, `PE3`, `SC2` and `TM2` are `error`, so
-  `validate --external` exits 2 for them; `E1` is `warning`. Use `severity_map` (rule id glob to severity) or
-  `max_severity` to lower a noisy rule, and `fail_on` to choose what fails the run.
-- **Overlap.** The built-in checks (`AR004`, `AR005`, `AR036`) and SkillSpector can report the same line; both are
-  kept, each with its own code, and the scanner's carry `[skillspector]` and its rule id (`AR011`).
-- **Cost.** `batch_size = 1` starts one SkillSpector process per skill, and each start costs about 2 to 4 s of its own
-  CPU before it analyses a file, so a 400-skill repository takes many minutes on a cold run. Keep CI fast with the
-  [scan cache](#result-cache-and-dry-runs) (an unchanged skill is not scanned again) and `--changed` or `--since`
-  (only skills with a changed file run). Runs go one at a time by default; set `parallel = 4` on the entry (at most 16)
-  to run several skills at once. `--no-scan-cache` scans every selected skill again.
-- **Not in a preset.** The profile is opt-in. `strict` fails on warnings, and SkillSpector's regex and YARA
-  heuristics are noisier than the structural checks in `baseline` and `strict`, need a separate tool install, and
-  run once per skill; a project chooses that cost by adding the entry.
-
-The same shape fits any scanner with one path argument: `batch_size = 1`, `{skill_dirs}`, SARIF on stdout, and an
-`egress_flags` / `required_flags` pair in a profile for the options that reach the network.
 
 ##### Failing on scanner findings
 
@@ -14946,8 +15146,8 @@ linted by `validate --strict` and `doctor`. The same checks run on any third-par
 
 | Code | Name | Default | Finds |
 | --- | --- | --- | --- |
-| AR9B0 | `okf-index-mismatch` | warning | An `index.md` entry points at a missing file, or a directory with an `index.md` has a concept or subdirectory it does not list |
-| AR9B1 | `okf-type-invalid` | error | Unparseable frontmatter, or a concept with no non-empty `type` (OKF conformance rules 1 and 2) |
+| AR9B0 | `okf-index-mismatch` | warning | An `index.md` entry points at a missing file, or a directory with an `index.md` has a concept or subdirectory it does not list; in a migrated configuration directory also an index that lists a title or description its concept no longer has (`ai-rulez generate` refreshes it) |
+| AR9B1 | `okf-type-invalid` | error | Unparseable frontmatter, or a concept with no non-empty `type` (OKF conformance rules 1 and 2); also an `x-ai-rulez` `kind` that is not `rules`, `context`, `skills`, `agents`, `commands`, `checks` or `skill-resource` (error, the message lists them), and, as a warning, a known `kind` that disagrees with the directory the concept sits in (a configuration directory classifies by directory and ignores the value) |
 | AR9B2 | `okf-link-broken` | warning | A markdown link in a concept does not resolve to a file in the bundle |
 | AR9B3 | `okf-version-invalid` | warning | Root `okf_version` is not `MAJOR.MINOR`; info when it is well formed but not `0.2`, and info when the root index uses the frontmatter style (the scheme OKF 0.2 does not describe); error from `okf validate` alone when the directory has no root `index.md` naming `okf_version` (it is not a bundle, and `import okf` refuses it too) |
 | AR9B4 | `okf-orphan` | info | A concept no index entry and no link reaches (only when the bundle has an index) |
@@ -15074,7 +15274,7 @@ does not override it; a rule that reports mild and serious cases at different le
 | AR015 | `secret-in-env-or-header` | error | A literal credential (not a `${VAR}` reference or placeholder) in an MCP server `env` value whose key names a secret, in an `Authorization`/`X-Api-Key`-style header, in a `--token`/`--api-key` argument or a URL query/userinfo, in the top-level `env` of `.claude/settings.json`, or in the headers of an `http` hook. A value shaped like a known credential is reported under any key. The finding names the key and never prints the value; the same checks apply to inline `mcpServers` in agent and skill frontmatter |
 | AR602 | `mcp-config-invalid` | error | A malformed MCP server definition in `config.toml`, the inline `mcpServers` of agent and skill frontmatter, `.mcp.json`, `.cursor/mcp.json` or `.vscode/mcp.json`: an empty server, a stdio server without `command`, an `http`/`sse` server without an absolute `url`, an unknown transport, `args`/`env`/`headers` of the wrong type, or a name defined twice in one file (case-insensitively). The deprecated SSE transport is a warning and a name outside letters, digits, `_` and `-` is info (Claude Code rewrites it in the `mcp__<server>__<tool>` names). A server in `.mcp.json`, `.cursor/mcp.json` or `.vscode/mcp.json` that `config.toml` also defines is a generated copy and is checked once, at its source. A non-loopback `http://` URL is reported by AR024 |
 | AR013 | `auto-invocation-danger` | warning | A skill or command the model can invoke by itself (no `disable-model-invocation: true`) that is allowed unrestricted `Bash` (`Bash`, `Bash(*)`; entries in `lint.security.allowed_tools` pass) and ships `scripts/`, or a subagent with `permissionMode: bypassPermissions`. Text the model reads could start such an item without a request from the user |
-| AR964 | `load-budget-exceeded` | warning | Content past a documented load limit of a configured harness, so the excess never reaches the model: a skill's `description` plus `when_to_use` over 1,536 characters (Claude Code skill listing), rules and context over 32 KiB together (Codex `AGENTS.md` chain, `project_doc_max_bytes`; info from 90%), a rule or context file over 12,000 characters (Windsurf/Devin workspace rules) or 500 lines (Cursor), and skill names and descriptions over 8,000 characters in total (Codex skill listing, info, since the real cap is about 2% of the context window). The limits live in one versioned table (`loadBudgets` in `internal/lint/ar_budget.go`) with the source URL and the date each figure was checked; the Codex skill-listing figure is not yet compared with the vendor page. The Agent Skills 500 lines and 5,000 tokens are enforced by AR901 and AR902 |
+| AR964 | `load-budget-exceeded` | warning | Content past a documented load limit of a configured harness, so the excess never reaches the model: a skill's `description` plus `when_to_use` over 1,536 characters (Claude Code skill listing), rules and context over 32 KiB together (Codex `AGENTS.md` chain, `project_doc_max_bytes`; info from 90%), a rule or context file over 12,000 characters (Windsurf/Devin workspace rules) or 500 lines (Cursor), and skill names and descriptions over 8,000 characters in total (Codex skill listing: warning past the limit, info from 90%; every skill the preset emits counts: authored, included, installed and the ones `scoped_fallback = "skill"` would write, and the message says how many come from includes or installed skills and how many are fallback skills, since the real cap is about 2% of the context window; the Codex rules-and-context total likewise includes included rules, and an included or installed skill over the Claude listing cap is reported on `config.toml`). The limits live in one versioned table (`loadBudgets` in `internal/lint/ar_budget.go`) with the source URL and the date each figure was checked; the Codex skill-listing figure is not yet compared with the vendor page. The Agent Skills 500 lines and 5,000 tokens are enforced by AR901 and AR902 |
 | AR210 | `import-invalid` | error | A Claude Code memory import (`@path/to/file.md`, `@./rel.md`) in a rule, context file, skill, agent or command whose file does not exist (looked up next to the file, in the skill directory, at the root and at the repository top). A circular chain and a chain of more than five hops (the depth Claude Code follows) are reported as warnings. Imports inside code spans and fenced blocks, `@~/...` and absolute paths (machine-dependent), e-mail addresses, `@scope/package` names and `@mentions` are ignored |
 | AR963 | `plugin-manifest-invalid` | error | A tracked `.claude-plugin/plugin.json` or `marketplace.json` that breaks the documented manifest schema: invalid JSON, a marketplace entry whose local `source` directory does not exist (relative to the marketplace root, or under `metadata.pluginRoot`), a missing or non-kebab-case `name`, a `version` that is not semver, `author`/`keywords` of the wrong type, component paths (`commands`, `agents`, `skills`, `hooks`, `mcpServers`, ...) that do not start with `./` or leave the plugin, a marketplace without `owner`, with a reserved name (`claude-code-marketplace`, `claude-plugins-official`, ...), with duplicate plugins or a bad `source`; unknown fields are warnings. `${CLAUDE_PLUGIN_ROOT}` left unquoted in a shell-form plugin hook command (a plugin path with a space splits it) is a warning. With `--external`, and when the `claude` binary is on `PATH`, `claude plugin validate <dir> --json` is also run for each plugin directory and its errors and warnings are merged (prefixed `claude plugin validate:`); without the binary this step is skipped silently |
 | AR014 | `exfil-command` | error | A network command (`curl`, `wget`, `nc`, `scp`, `rsync`, httpie, `iwr`) that sends a secret environment variable (`$API_KEY`, `$GITHUB_TOKEN`, `$DATABASE_URL`, names ending in `SECRET`, `TOKEN`, `PASSWORD`, ...), the environment (`env \| curl`, `$(printenv)`) or a credential file off the machine, and DNS exfiltration (`dig $(...)`). Read in prose, fenced shell and scripts, continuation lines joined. A secret used only in an authentication header is a warning (`-H "Authorization: Bearer $TOKEN"`); a line whose URLs are all in `lint.security.allowed_hosts` passes. Fenced shell and scripts are never suppressed by surrounding "never do this" text; an inline code span in prose is not reported when the line is a guardrail ("never run `env \| curl ...`") or a reviewer names it ("flag any skill that contains `printenv \| nc ...`") |
@@ -16829,23 +17029,23 @@ fields of an imported eval scenario that have no counterpart in the case format 
 
 ##### AR9B0 okf-index-mismatch
 
-an OKF index.md lists a file that does not exist, or omits a concept or subdirectory of its directory
+an OKF index.md lists a file that does not exist, omits a concept or subdirectory of its directory, or (in a migrated configuration directory) lists a title or description its concept no longer has
 
 - Default severity: `warning`
 - Analyzer: `okf` (scope `item`)
 - Why: An OKF index that lists missing files, or omits existing ones, misleads every reader that navigates by it.
-- Bad: An index.md entry for a deleted concept
-- Good: Regenerate with `ai-rulez export okf`
+- Bad: An index.md entry for a deleted concept, or one still showing a skill's old description
+- Good: Run `ai-rulez generate` (the configuration directory) or `ai-rulez export okf` (an exported bundle)
 
 ##### AR9B1 okf-type-invalid
 
-an OKF concept has unparseable frontmatter or a missing or empty type
+an OKF concept has unparseable frontmatter or a missing or empty type, or an x-ai-rulez kind that is unknown (error) or disagrees with its directory (warning)
 
 - Default severity: `error`
 - Analyzer: `okf` (scope `item`)
-- Why: An OKF concept without a parseable type cannot be classified.
-- Bad: A concept whose frontmatter has no `type`
-- Good: Give every concept a non-empty `type`
+- Why: An OKF concept without a parseable type, or with an x-ai-rulez kind that is not a content kind, cannot be classified; a kind that disagrees with the directory is ignored by the loader.
+- Bad: A concept whose frontmatter has no `type`, or `x-ai-rulez: {kind: bogus}`
+- Good: Give every concept a non-empty `type` and a kind from rules, context, skills, agents, commands, checks or skill-resource that matches its directory
 
 ##### AR9B2 okf-link-broken
 
@@ -18412,7 +18612,7 @@ Add a Git source to `poly.toml`:
 [[hooks.sources]]
 id = "ai-rulez"
 git = "https://github.com/Goldziher/ai-rulez.git"
-revision = "v5.7.0"
+revision = "v5.8.0"
 hooks = ["ai-rulez-validate"]
 ```
 
@@ -19029,6 +19229,15 @@ pins and content pins of other items are not recomputed (as with `lock <name>`):
   `ai-rulez lock` runs the same scan over every remote tree it pins to something new (a new entry, or a changed
   commit or digest; unchanged pins were scanned when pinned) and takes the same `--accept-findings`.
 
+###### From an MCP client
+
+The MCP server has a tool for each read of this section: `lock_outdated` (`lock --outdated`), `update_plan`
+(`update --dry-run`) and `lock_diff` (`lock --diff`), and one that moves pins, `update`. They run the same code, so
+the scan before pinning and the refusals above apply, and a refusal comes back as an error result carrying the update
+document with nothing written. Consent (`--accept-moved-tag`, `--accept-findings`, `--allow-downgrade`, `--major`) is
+not a tool argument: it stays on the command line. A read-only server lists all but `update`. See
+[Pin Tools](mcp-server.md#pin-tools-lock_outdated-update_plan-update).
+
 ###### Taking a new major version
 
 `update --major` looks at the sources that have a newer major version than their constraint allows, and prints the
@@ -19404,7 +19613,7 @@ jobs:
   outdated:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: npm install -g ai-rulez            # or: uvx ai-rulez
       - name: Report outdated sources
         env:
@@ -19414,14 +19623,16 @@ jobs:
       - name: Verify pinned tags did not move
         run: ai-rulez lock --check --verify-tags
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: outdated
           path: outdated.json
 ```
 
 `--fail-on-outdated` exits `2` when any source has an allowed update, so the job turns red until someone runs
-`ai-rulez update` and merges the lock; a moved or deleted tag and an unsatisfiable constraint fail it too. To report
+`ai-rulez update` and merges the lock; a moved or deleted tag and an unsatisfiable constraint fail it too. To have CI
+run the update and open the pull request itself, use the
+[`Goldziher/ai-rulez/update@v5` sub-action](github-actions.md#scheduled-pin-updates-update). To report
 without failing, drop the flag and read `summary.updatable` and `summary.held_back` from the JSON. To make "outdated"
 a finding instead, turn on `AR734` and let the exit code gate:
 
@@ -19866,7 +20077,7 @@ jobs:
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
@@ -21412,6 +21623,8 @@ rewrites them), and the test fails when they are stale.
 | `skill remove` | `uninstall_skill` | authoring |  |
 | `judge` | `judge` | authoring |  |
 | `lock --check` | `lock_status` | authoring | yes |
+| `lock --diff` | `lock_diff` | authoring |  |
+| `lock --outdated` | `lock_outdated` | authoring |  |
 | `okf validate` | `okf_validate` | authoring | yes |
 | `validate --show-policy` | `policy_show` | authoring | yes |
 | `profile add` | `add_profile` | authoring |  |
@@ -21432,6 +21645,8 @@ rewrites them), and the test fails when they are stale.
 | `show skill` | `read_skill` | authoring |  |
 | `remove skill` | `delete_skill` | authoring |  |
 | `tokens` | `token_report` | authoring | yes |
+| `update` | `update` | authoring |  |
+| `update --dry-run` | `update_plan` | authoring |  |
 | `validate` | `validate_config` | authoring | yes |
 | `verifiers list` | `list_verifiers` | authoring |  |
 | `verifiers run` | `run_verifiers` | authoring |  |
@@ -21452,6 +21667,7 @@ rewrites them), and the test fails when they are stale.
 | `convert`, `migrate *` | one-shot conversions that read untrusted tool files and rewrite the tree; gated by --write or a preview |
 | `eval *`, `improve *` | run models and harness subprocesses and spend money |
 | `guard` | a hook entry point the harness calls on tool use |
+| `skill update` | re-pins installed skills over the network and rewrites the lock |
 | `list` | prints where skills and commands land per harness; generate_outputs dry_run returns the same plan |
 | `llm *` | model credentials and cost estimates for network calls |
 | `local *` | the machine-local overlay is per developer; tools reach it through the local argument of the item tools and update_config |
@@ -21469,7 +21685,6 @@ rewrites them), and the test fails when they are stale.
 | `sign`, `trust update` | signs with a key, an OIDC identity or a transparency log: credentials and egress |
 | `edit skill` | partial field edits and stdin input; update_skill is the whole-item replacement for a tool client |
 | `telemetry *` | consent and network egress of usage data |
-| `skill update`, `update` | moves pinned remote sources to newer tags over the network and rewrites the lock |
 | `verifiers calibrate`, `verifiers explain`, `verifiers suggest`, `verifiers test` | calibrate, suggest and test run models or programs; explain prints the help text of a verifier |
 | `verify` | verifies signatures, attestations and downloaded artifacts with the signing backend; the drift half is generate_outputs check and doctor |
 
@@ -21522,7 +21737,7 @@ ai-rulez mcp --serve-skills --read-only          # serve skills and inspect, nev
 | `--targets` | Preset whose rendering is served (its frontmatter dialect and placement rules). Default: the first configured preset that produces skills. |
 | `--domain` | Keep only skills of these domains (repeatable); `root` selects skills owned by no domain. A name that is not a domain of the project is an error at start. |
 | `--allow` / `--deny` | Glob patterns on the skill name. `--allow` keeps only matching skills; `--deny` always wins. |
-| `--read-only` | Register only the read-only authoring tools (validate, scan, doctor, the read/list and report tools). The server can inspect a project but never change it. The `judge` tool is not registered either: it sends file content to a model provider and spends money. |
+| `--read-only` | Register only the read-only authoring tools (validate, scan, doctor, the read/list and report tools, and the lock tools `lock_status`, `lock_diff`, `lock_outdated` and `update_plan`). The server can inspect a project but never change it. The `update` tool is not registered. The `judge` tool is not registered either: it sends file content to a model provider and spends money. |
 | `--tools` | Register only these tools (repeatable or comma separated), for example `--tools find_skill,load_skill,find_context,load_context` for a server that can only read skills and context. Applies to `mcp` and to `mcp --serve-skills`. An unknown name is an error that lists the valid tools; a valid name the server would not register anyway (a writing tool under `--read-only`, a context tool without discovery) is simply absent. |
 | `--root` / `--allow-any-dir` | Confine the authoring tools to a directory, as for plain `mcp`. |
 
@@ -22550,7 +22765,7 @@ The server provides Claude with access to read and modify your configuration, wh
 
 #### MCP Tools Reference
 
-The ai-rulez MCP server exposes 66 tools for programmatic configuration management. These tools allow AI assistants to initialize projects, generate and clean outputs, validate configuration, inspect builtins, and create, read, update, and delete configuration elements.
+The ai-rulez MCP server exposes 71 tools for programmatic configuration management. These tools allow AI assistants to initialize projects, generate and clean outputs, validate configuration, inspect builtins, and create, read, update, and delete configuration elements.
 
 Every tool below accepts an optional `working_directory` parameter (the directory to operate in),
 except the two utility tools `get_version` and `show_builtin`. The per-tool parameter lists below
@@ -23376,14 +23591,15 @@ resource-not-found error.
 
 ##### Governance Tools
 
-Four read-only tools expose the roles, lock and catalog surface of the CLI. They never write a file and never use
+Five read-only tools expose the roles, lock and catalog surface of the CLI. They never write a file and never use
 the network: remote includes and installed skills resolve from the local cache only, and one that is not cached is
 left out (the result then carries a second text block saying so). Each returns the JSON of the matching CLI command
 with `--format json`, compacted onto one line, so a client can parse either source the same way. They are annotated
-read-only and registered on the authoring server only (not on `--serve-skills`). Mutating lock operations
-(`lock`, `update`) stay CLI-only.
+read-only and registered on the authoring server only (not on `--serve-skills`). Writing the lock (`lock`) stays
+CLI-only; the tools that read the remotes' tags and move pins are described under
+[Pin Tools](#pin-tools-lock_outdated-update_plan-update).
 
-All four take the common parameters `config_file`, `config_dir`, `no_local` and `working_directory`
+All five take the common parameters `config_file`, `config_dir`, `no_local` and `working_directory`
 (`lock_status` always ignores the machine-local overlay, as `lock --check` does).
 
 | Tool | CLI equivalent | Parameters |
@@ -23391,6 +23607,7 @@ All four take the common parameters `config_file`, `config_dir`, `no_local` and 
 | `list_roles` | `roles list --format json` | common only |
 | `resolve_role` | `roles resolve <role> --format json` | `role` (required), `limit` |
 | `lock_status` | `lock --check --format json` | `kind`, `profile`, `role`, `targets`, `include_static`, `sources` |
+| `lock_diff` | `lock --diff --format json` | `profile`, `role`, `targets`, `include_static`, `sources` |
 | `catalog` | `catalog --format json` | `kind`, `role`, `limit` |
 
 **Output limits.** `resolve_role` and `catalog` list at most `limit` items (default 200, maximum 1000; a smaller
@@ -23423,6 +23640,13 @@ is an error result ("nothing to check", with the hint to run `ai-rulez lock`), a
 | `include_static` | boolean | Also check the view that serves static skills too (`lock --include-static`) |
 | `sources` | string[] | Also check the view with these extra skill sources (`lock --source`) |
 
+###### `lock_diff`
+
+How the sources and outputs differ from `ai-rulez.lock`, for pull request review ([`lock --diff`](lockfile.md)),
+following `schema/lock-diff.schema.json`. It takes the selectors of `lock_status` except `kind`, lists the per-file
+digests of a changed role, and never fails for a missing lock: a project that was never locked has nothing to
+compare, as with the command, which exits 0 whatever it finds.
+
 ###### `catalog`
 
 Every rule, skill, agent, command and context file with owner, version, tokens, digest, roles and the lock status
@@ -23433,6 +23657,43 @@ Every rule, skill, agent, command and context file with owner, version, tokens, 
 | `kind` | string | Only items of this kind: `rule`, `skill`, `agent`, `command`, `check` or `context` |
 | `role` | string | Only the items this role keeps; `roles` shrinks to that role |
 | `limit` | number | Maximum items returned |
+
+##### Pin Tools (`lock_outdated`, `update_plan`, `update`)
+
+Three tools run the code of `ai-rulez lock --outdated`, `ai-rulez update --dry-run` and `ai-rulez update`
+(`internal/pinupdate`), so the defenses are the same as on the command line. Unlike the governance tools above they
+read the network: they ask the remotes the project already declares for their tags, and annotate themselves
+open-world. They send nothing of the project, and `config.toml` is never edited.
+
+| Tool | CLI equivalent | Writes | Listed when `read_only = true` |
+| --- | --- | --- | --- |
+| `lock_outdated` | `lock --outdated --format json` | nothing | yes |
+| `update_plan` | `update --dry-run --format json` | nothing (the local cache is refreshed) | yes |
+| `update` | `update [name...] --format json` | `ai-rulez.lock` | no |
+
+All three take the common parameters plus `kind` (`include`, `skill`, `source`, `marketplace` or `plugin`) and
+`names`, the sources to limit the run to (default: every source that uses a `version` constraint). A name that
+matches no such source is an error, as on the command line.
+
+**Documents.** `lock_outdated` returns `schema/lock-outdated.schema.json` and `update_plan` and `update` return
+`schema/update.schema.json`: the same JSON as the commands, compacted onto one line. A successful `update` adds a
+second text block with the next step (`ai-rulez generate`, then `ai-rulez lock`, which refreshes the output and
+served-skill pins).
+
+**Refusals.** `update_plan` and `update` run the pre-pin security scan (`AR001`-`AR009`) over every new tree and the
+checks of the command: a tag that moved since it was pinned (`AR732`), an unsatisfiable constraint (`AR730`), an
+invalid one (`AR731`), a tag held back by `min_release_age` (`AR733`). A refused source makes the result an error
+(`isError`) whose text and `structuredContent` are the update document, with the refused sources under `blocked` or the
+rejected scan under `updates[].scan` (`"refused": true`), followed by a text block saying nothing was written. No
+partial update is written.
+
+**Consent stays on the command line.** The tools take no `accept_findings`, `accept_moved_tag` or `allow_downgrade`
+argument, and not `--major` or `--write-config`: an agent cannot override a refusal. A person reviews it and runs
+`ai-rulez update --accept-moved-tag` or `--accept-findings`.
+
+With `--read-only` (or `[mcp] read_only = true`) `lock_outdated`, `update_plan` and `lock_diff` stay listed, since they
+change nothing in the project, and `update` is not registered. They are the only open-world tools a read-only server
+lists; `judge` is not.
 
 ---
 
@@ -26735,9 +26996,9 @@ No trap unit (a benign lookalike of a known false-positive shape) produced a sec
 twins were found. No candidate was dropped as ungrounded (one needed the repair round); the adjudicator raised security precision from 0.94 to 1.00. Three malicious samples (an exfiltration of `~/.ssh`, a
 disk-filling loop, a vendor health probe with a hidden upload) were still declined by the provider's content filter after
 one retry: judge reports those units as partly reviewed (the run is `incomplete`, exit 1), never as a pass. On the 46
-sampled units that hold a skill, the offline modes of two open-source scanners, with their categories mapped onto the
-security codes and medium severity or above counted, scored F1 0.47 (Cisco skill-scanner: precision 1.00, recall 0.31) and
-0.40 (SkillSpector: precision 0.42, recall 0.38) against 0.87 for judge (precision 1.00, recall 0.77). The corpus is small and
+sampled units that hold a skill, the offline mode of an open-source scanner (Cisco skill-scanner), with its categories
+mapped onto the security codes and medium severity or above counted, scored F1 0.47 (precision 1.00, recall 0.31) against
+0.87 for judge (precision 1.00, recall 0.77). The corpus is small and
 written by the same effort that wrote the prompts; read the numbers as a regression baseline, not as a field measurement.
 
 #### What is sent
@@ -27445,8 +27706,10 @@ one). Two properties keep the result deterministic:
   `cmd/commands`) and the run prints them with that root's result. The writing `generate --recursive` shows a progress
   counter and logs a root's load warnings as they happen.
 
-A recursive run with `gitignore = true` writes one managed block at the repository toplevel, holding every root's
-patterns, and `--check` verifies that block once after the last root. See [Monorepo](monorepo.md).
+A recursive run with `gitignore = true` writes one managed block per git repository, at that repository's toplevel,
+holding the patterns of the roots inside it, and `--check` verifies each block once after the last root. A root's
+patterns never reach the `.gitignore` of another repository or of a root with `gitignore = false`. See
+[Monorepo](monorepo.md).
 
 #### The managed `.gitignore` block
 
@@ -27458,8 +27721,14 @@ With `gitignore = true` (or `generate --gitignore`) ai-rulez maintains a `# BEGI
   block left out. An entry already ignored by your rules, or re-included by a negation of yours, is left out of the block.
 - `gitignore_exclude` lists generated outputs you commit on purpose; they stay out of the block while every other entry stays
   managed. Machine-local and secret outputs are never excluded.
-- Machine-local outputs (`*.local.*`, `config.local.*`, `.ai-rulez/local/`, the local manifest) are ignored even when
-  `gitignore = false`, and an MCP config holding secrets is refused unless git ignores it.
+- The block is the same on every machine and with or without `--no-local`. It always lists `.ai-rulez/config.local.*`
+  (and the overlay's `.config.local.*` lock and temp files), `.ai-rulez/local/` and the machine-local manifest, whether
+  or not those exist. It never lists a path only because this machine's local inputs add it: outputs the overlay or
+  `local/` content creates (`CLAUDE.local.md`, a hook-only `.claude/settings.json`, local skills) are kept in
+  `.git/info/exclude`, which is not committed.
+- With `gitignore = false` the machine-local inputs that exist (`config.local.*`, `local/`) are still ignored, and an
+  MCP config holding secrets is refused unless git ignores it. A machine-local manifest that is the only local file goes
+  to `.git/info/exclude`, so `generate` does not write a tracked `.gitignore` for a project that turned it off.
 - `generate --check` reports a block that differs from what a run would write as drift, and `generate` warns when a tracked
   file matches a line of the block.
 
@@ -27969,7 +28238,7 @@ text mode.
 `list` and `show` print their own documents. A failure under `--format json` is the standard error document.
 
 The global `--config-dir <name>` (a directory below the working directory, or an absolute path) and `-C <dir>`
-(a config directory, or a file inside one) select the project these commands act on, exactly as for `generate`.
+(a config directory such as `.ai-rulez` or `.agents`, or a file inside one such as `.agents/ai-rulez.toml`) select the project these commands act on, exactly as for `generate`.
 Without them the directory is discovered: `.ai-rulez/`, then `.config/ai-rulez/`.
 
 `ai-rulez add`, `remove`, `list`, `show`, `edit`, `domain`, `profile`, `include`, `skill` and `builtins` without a
@@ -29088,7 +29357,7 @@ Teams that commit generated files can gate CI on `generate --check`. It renders 
 | `stale: <path>` | The sources changed (or the rendering did); `generate` would rewrite it |
 | `edited: <path>` | The body no longer matches the `Content-Hash` in its own header: a hand edit; `generate` overwrites it, so the edit is lost |
 | `orphan: <path>` | Listed in the previous manifest, no longer rendered; `generate` would delete it. Without a manifest (CI, a fresh checkout) a generated file whose source was removed is still reported: a file under an output directory that carries a `Content-Hash` header and that no output emits is an orphan |
-| `missing: .gitignore (managed block)` / `stale: .gitignore (managed block)` | The managed `.gitignore` block (see [`gitignore`](configuration.md#gitignore)) is absent, or does not hold exactly the entries `generate` would write (a missing entry, or a line inside the block that `generate` would remove, is drift), or `generate` would remove it. Lines outside the block are never judged. When `.gitignore` is a symlink, git does not read it and `generate` keeps the entries in `.git/info/exclude`; `--check` judges that file's `ai-rulez` block the same way and names it as `.git/info/exclude`. A recursive run checks the one shared block at the repository toplevel, once every root is read; in `--format json` the item is `{"kind", "path": ".gitignore", "note": "managed block"}` |
+| `missing: .gitignore (managed block)` / `stale: .gitignore (managed block)` | The managed `.gitignore` block (see [`gitignore`](configuration.md#gitignore)) is absent, or does not hold exactly the entries `generate` would write (a missing entry, or a line inside the block that `generate` would remove, is drift), or `generate` would remove it. Lines outside the block are never judged. When `.gitignore` is a symlink, git does not read it and `generate` keeps the entries in `.git/info/exclude`; `--check` judges that file's `ai-rulez` block the same way and names it as `.git/info/exclude`. A recursive run checks the shared block of each git repository at its toplevel, once every root is read; in `--format json` the item is `{"kind", "path": ".gitignore", "note": "managed block"}` |
 | `blocked: <path>` | A machine-local input (overlay or `local/` tree) would change this file and `generate` refuses to write it because it is tracked or not git-ignored; the same refusal `generate` and `generate --dry-run` report. `--allow-local-drift` lifts it |
 
 With a machine-local overlay or `local/` content, `--check` classifies the outputs like `generate` does, so files that `generate` keeps for the local inputs and that are in sync are not reported. `--check` does not print the summary of rules whose activation a tool cannot express; `generate` prints it.
@@ -30505,7 +30774,7 @@ These flags work with all commands:
 
 | Flag               | Type    | Description                                                                     |
 | ------------------ | ------- | ------------------------------------------------------------------------------- |
-| `--config` / `-C`  | string  | The project to use: a configuration directory (such as `.ai-rulez`) or a config file. Auto-discovered if not specified. This is the only way to name it: no command takes a config path as an argument |
+| `--config` / `-C`  | string  | The project to use: a configuration directory (such as `.ai-rulez` or `.agents`) or a config file. Auto-discovered if not specified. This is the only way to name it: no command takes a config path as an argument |
 | `--config-dir`     | string  | Configuration directory name below the working directory (default `.ai-rulez`, then `.config/ai-rulez`); no command declares its own copy |
 | `--token` / `-T`   | string  | Git access token for private repositories (or use `AI_RULEZ_GIT_TOKEN` env var) |
 | `--debug` / `-D`   | boolean | Enable debug output (or `AI_RULEZ_DEBUG=1`)                                     |
@@ -32524,7 +32793,7 @@ ai-rulez include add mine ../my-rules --local
 | `--install-to` | string |  | Installation path (optional) |
 | `--local` | bool |  | Write to the machine-local config.local.* overlay instead of the shared config |
 | `--merge-strategy` | string |  | Merge strategy: local-override (default), include-override, or error |
-| `--path` | string |  | Subdirectory within git repository (git only) |
+| `--path` | string |  | Subdirectory of the git repository or local source directory |
 | `--ref` | string |  | Branch, tag, or commit to use (git only) |
 
 #### `ai-rulez include list`
@@ -35358,7 +35627,7 @@ Add a `.vscode/settings.json` to reference the schema:
 - **`profiles`**: Named profiles specifying which domains to include
 - **`default`**: Default profile name
 - **`schema`**: URL of the JSON Schema, for editor support
-- **`rules`**: Rules output mode (`mode`, `mode_by_preset`, `scoped_fallback`, `baz_scoped`, `baz_default`, `baz.include`, `baz_rest`, `baz_unscoped`, `baz_dedupe`, `baz_dedupe_max`, `baz_budget`; see [Rules](rules.md#rules-mode))
+- **`rules`**: Rules output mode (`mode`, `mode_by_preset`, `scoped_fallback`, `scoped_fallback_group`, `baz_scoped`, `baz_default`, `baz.include`, `baz_rest`, `baz_unscoped`, `baz_dedupe`, `baz_dedupe_max`, `baz_budget`; see [Rules](rules.md#rules-mode))
 - **`scopes`**: Additional scoped output roots. Their root files (`AGENTS.md`/`CLAUDE.md`) stay in the subfolder; rule files go to the root rules folders
 - **`gitignore`**: Whether to maintain the managed .gitignore block with generated output patterns (default: false)
 - **`includes`**: External content sources to merge

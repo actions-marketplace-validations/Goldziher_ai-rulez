@@ -45,7 +45,7 @@ WARN  3 rules/context items use an activation the target tool cannot express; th
 .agents/skills/ship/agents/openai.yaml file 0644 43 a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94
 .ai-rulez/ dir 0755
 .ai-rulez/.generated-manifest.json file 0644 4821 563e5bb622d69fbb76fc46dd52cda3730a48201fb75f1cb74478d595345c94fb
-.ai-rulez/.generated-manifest.local.json file 0644 12676 5b982bb063c29f7d929add5eccb343e4e3c0d9b5b2a383b6c5f50cbea0a3acfe
+.ai-rulez/.generated-manifest.local.json file 0644 12676 81f817cf37f9c6431a1dc21f51efb7e0716481175711c6c2790d6b6d65514bdc
 .ai-rulez/agents/ dir 0755
 .ai-rulez/agents/architect.md file 0644 97 fc714ad19a3a1c9348f1a954f3a7d43dfa07a8640a114d2f7c14777f23871d72
 .ai-rulez/agents/tester.md file 0644 82 72927a1eaca26accd861c5afde228c7c585007302e27d927af597b36733b831a
@@ -152,7 +152,7 @@ WARN  3 rules/context items use an activation the target tool cannot express; th
 .github/skills/reviewer/references/checklist.md file 0644 28 02393d1b57638cc3b06632e057556d199781a02f385c4299936253c78ecd5328
 .github/skills/reviewer/scripts/ dir 0755
 .github/skills/reviewer/scripts/run.sh file 0644 22 914c2af00a91392459c499b94b955b3334a860831f85bbf3c4cc644460f877b8
-.gitignore file 0644 1181 2d77b4f6f0d335b3530fa04d2069b4e6ae18f4d90fe8cb3dde3217dc7459cdb9
+.gitignore file 0644 1232 35a2d8c0ed05d23a1e6fe47fe91eea8527cf5b31cabf5ac4e9acb5fcfee301db
 .mcp.json file 0644 543 3c58836c57158e851600f9a8d15fa7cf1f154da682c93432926b5b5392208c4c
 .opencode/ dir 0755
 .opencode/agents/ dir 0755
@@ -1082,7 +1082,7 @@ info      session-start  the SessionStart hook tries, in order: ai-rulez session
 .agents/skills/ship/agents/openai.yaml file 0644 43 a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94
 .ai-rulez/ dir 0755
 .ai-rulez/.generated-manifest.json file 0644 4821 563e5bb622d69fbb76fc46dd52cda3730a48201fb75f1cb74478d595345c94fb
-.ai-rulez/.generated-manifest.local.json file 0644 12676 5b982bb063c29f7d929add5eccb343e4e3c0d9b5b2a383b6c5f50cbea0a3acfe
+.ai-rulez/.generated-manifest.local.json file 0644 12676 81f817cf37f9c6431a1dc21f51efb7e0716481175711c6c2790d6b6d65514bdc
 .ai-rulez/agents/ dir 0755
 .ai-rulez/agents/architect.md file 0644 97 fc714ad19a3a1c9348f1a954f3a7d43dfa07a8640a114d2f7c14777f23871d72
 .ai-rulez/agents/tester.md file 0644 82 72927a1eaca26accd861c5afde228c7c585007302e27d927af597b36733b831a
@@ -1189,7 +1189,7 @@ info      session-start  the SessionStart hook tries, in order: ai-rulez session
 .github/skills/reviewer/references/checklist.md file 0644 28 02393d1b57638cc3b06632e057556d199781a02f385c4299936253c78ecd5328
 .github/skills/reviewer/scripts/ dir 0755
 .github/skills/reviewer/scripts/run.sh file 0644 22 914c2af00a91392459c499b94b955b3334a860831f85bbf3c4cc644460f877b8
-.gitignore file 0644 1181 2d77b4f6f0d335b3530fa04d2069b4e6ae18f4d90fe8cb3dde3217dc7459cdb9
+.gitignore file 0644 1232 35a2d8c0ed05d23a1e6fe47fe91eea8527cf5b31cabf5ac4e9acb5fcfee301db
 .mcp.json file 0644 543 3c58836c57158e851600f9a8d15fa7cf1f154da682c93432926b5b5392208c4c
 .opencode/ dir 0755
 .opencode/agents/ dir 0755

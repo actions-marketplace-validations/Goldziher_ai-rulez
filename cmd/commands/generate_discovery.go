@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -290,8 +291,8 @@ func processConfigFiles(configFiles []string) (generated int, failed []string) {
 
 // processConfigFilesCounting is processConfigFiles that also returns how many of
 // the failures were lock drift (see lockDriftError). sink, when non-nil, is the
-// recursive run's shared .gitignore block (see GitignoreSink).
-func processConfigFilesCounting(configFiles []string, sink *generator.GitignoreSink) (generated int, failed []string, drifted int) {
+// recursive run's shared .gitignore block (see GitignoreSinks).
+func processConfigFilesCounting(configFiles []string, sink *generator.GitignoreSinks) (generated int, failed []string, drifted int) {
 	fileCounter := progress.NewFileCounter(len(configFiles), "Processing configurations")
 
 	// Each config has its own working directory and produces independent
@@ -335,10 +336,32 @@ func processConfigFilesCounting(configFiles []string, sink *generator.GitignoreS
 	return int(totalGenerated), failed, drifted
 }
 
+// recursiveRootGates runs the checks every root of a recursive run passes before
+// it renders: policy, validation, the lock, moved tags, overrides and imports.
+func recursiveRootGates(ctx context.Context, cfg *config.Config) error {
+	// The organization policy applies to every root, not only a single one.
+	if err := policyGate(ctx, cfg); err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err //nolint:wrapcheck // already contextual
+	}
+	if err := enforceLockedContent(cfg); err != nil { //nolint:contextcheck // the lock check reads the policy and the lock from disk; it takes no context
+		return err
+	}
+	if err := movedTagsErr(ctx, cfg); err != nil { // --verify-tags or [lock] verify_tags, per root
+		return err
+	}
+	if err := applyGenerateOverrides(ctx, cfg); err != nil {
+		return err
+	}
+	return importGate(ctx, cfg)
+}
+
 // processConfigFile generates from one config. A non-nil error means the config
 // failed (and was already reported through fileCounter). sink is the recursive
 // run's shared .gitignore block, or nil outside a recursive run.
-func processConfigFile(configPath string, fileCounter *progress.FileCounter, sink *generator.GitignoreSink) (int, error) {
+func processConfigFile(configPath string, fileCounter *progress.FileCounter, sink *generator.GitignoreSinks) (int, error) {
 	fileCounter.StartFile(configPath)
 
 	ctx := gitutil.WithMemo(cmdContext())
@@ -349,34 +372,22 @@ func processConfigFile(configPath string, fileCounter *progress.FileCounter, sin
 	}
 	warnLegacyLayout(cfg.ConfigDir)
 
-	// The organization policy applies to every root, not only a single one.
-	if err := policyGate(ctx, cfg); err != nil {
+	if err := recursiveRootGates(ctx, cfg); err != nil {
 		fileCounter.ErrorFor(configPath, err)
 		return 0, err
 	}
 
-	// Validate configuration
-	if err := cfg.Validate(); err != nil {
-		fileCounter.ErrorFor(configPath, err)
-		return 0, err
-	}
-
-	if err := enforceLockedContent(cfg); err != nil {
-		fileCounter.ErrorFor(configPath, err)
-		return 0, err
-	}
-	if err := movedTagsErr(ctx, cfg); err != nil { // --verify-tags or [lock] verify_tags, per root
-		fileCounter.ErrorFor(configPath, err)
-		return 0, err
-	}
-
-	if err := applyGenerateOverrides(ctx, cfg); err != nil {
-		fileCounter.ErrorFor(configPath, err)
-		return 0, err
-	}
-	if err := importGate(ctx, cfg); err != nil {
-		fileCounter.ErrorFor(configPath, err)
-		return 0, err
+	// A plugin-authoring root is built as a bundle, as `generate --plugin` does in
+	// it, instead of rendering harness files into the shipped tree. It is
+	// reloaded the way plugin mode loads (without the machine-local overlay).
+	plugin := pluginMode
+	if !plugin && cfg.IsPluginAuthoringRoot() {
+		plugin = true
+		logger.Info("Generating a plugin-authoring root in plugin mode", "config", configPath)
+		if cfg, err = reloadForPlugin(ctx, configPath); err != nil {
+			fileCounter.ErrorFor(configPath, err)
+			return 0, err
+		}
 	}
 
 	// Create generator
@@ -384,16 +395,19 @@ func processConfigFile(configPath string, fileCounter *progress.FileCounter, sin
 	gen.SetAllowLocalDrift(allowLocalDrift)
 	gen.SetOverwriteUnowned(generateForce)
 	gen.SetContext(ctx)
-	attachRecursiveGitignoreSink(gen, cfg, sink)
+	gen.SetExcludeLocks(sink.ExcludeLocks())
+	if !plugin {
+		attachRecursiveGitignoreSink(ctx, gen, cfg, sink)
+	}
 	if err := applyRole(gen); err != nil {
 		fileCounter.ErrorFor(configPath, err)
 		return 0, err
 	}
-	if err := generatePreflight(cfg, gen); err != nil {
+	if err := generatePreflightFor(cfg, gen, plugin); err != nil {
 		fileCounter.ErrorFor(configPath, err)
 		return 0, err
 	}
-	if pluginMode {
+	if plugin {
 		return processPluginConfig(configPath, cfg, gen, fileCounter)
 	}
 
@@ -406,6 +420,11 @@ func processConfigFile(configPath string, fileCounter *progress.FileCounter, sin
 		return 0, nil
 	}
 
+	if err := refreshOKFIndexes(ctx, cfg); err != nil {
+		fileCounter.ErrorFor(configPath, err)
+		return 0, err
+	}
+
 	// Generate files
 	written, err := gen.GenerateFiles(profile)
 	if err != nil {
@@ -416,6 +435,22 @@ func processConfigFile(configPath string, fileCounter *progress.FileCounter, sin
 	fileCounter.FinishFile()
 
 	return written, nil
+}
+
+// reloadForPlugin loads a root the way `generate --plugin` does and applies the
+// checks and overrides processConfigFile ran on the first load.
+func reloadForPlugin(ctx context.Context, configPath string) (*config.Config, error) {
+	cfg, err := loadProjectFile(ctx, configPath, append(pluginLoadOptions(true), config.WithFrontmatterErrors())...)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if err := applyGenerateOverrides(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // processPluginConfig is processConfigFile for `generate --plugin`.
@@ -445,21 +480,17 @@ func processPluginConfig(configPath string, cfg *config.Config, gen *generator.G
 	return written, nil
 }
 
-// openRecursiveGitignoreSink returns the shared sink for a recursive run when
-// the working tree has a git toplevel, else nil.
-func openRecursiveGitignoreSink() *generator.GitignoreSink {
-	ctx := gitutil.WithMemo(cmdContext())
-	top := (gitutil.Git{}).TopLevelContext(ctx, ".")
-	if top == "" {
-		return nil
+// attachRecursiveGitignoreSink points a root's generator at the managed block of
+// its own git repository, with its patterns expressed relative to that
+// repository's toplevel. Roots of one repository share a block; a nested
+// repository gets its own, and no root writes into another repository's
+// .gitignore. A root outside any repository keeps the per-root behavior and
+// writes beside its config.
+func attachRecursiveGitignoreSink(ctx context.Context, gen *generator.Generator, cfg *config.Config, sinks *generator.GitignoreSinks) {
+	if sinks == nil {
+		return
 	}
-	return generator.NewGitignoreSink(top)
-}
-
-// attachRecursiveGitignoreSink points a root's generator at the shared block,
-// with its patterns expressed relative to the toplevel. A root that is not
-// below the toplevel (a separate work tree) keeps the per-root behavior.
-func attachRecursiveGitignoreSink(gen *generator.Generator, cfg *config.Config, sink *generator.GitignoreSink) {
+	sink := sinks.For((gitutil.Git{}).TopLevelContext(ctx, cfg.BaseDir))
 	if sink == nil {
 		return
 	}
@@ -484,7 +515,7 @@ func runRecursiveGenerate() int {
 		renderError(os.Stderr, walkErr)
 		return exitFailure
 	}
-	sink := openRecursiveGitignoreSink()
+	sink := generator.NewGitignoreSinks()
 	configFiles := found.configs
 	if pluginMode {
 		var err error

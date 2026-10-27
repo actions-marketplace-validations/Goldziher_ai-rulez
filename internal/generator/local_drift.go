@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/samber/oops"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/Goldziher/ai-rulez/v5/internal/generator/jsonmerge"
 	"github.com/Goldziher/ai-rulez/v5/internal/gitignore"
 	"github.com/Goldziher/ai-rulez/v5/internal/gitutil"
+	"github.com/Goldziher/ai-rulez/v5/internal/lockfile"
 	"github.com/Goldziher/ai-rulez/v5/internal/templates"
 )
 
@@ -37,6 +40,9 @@ type localPlan struct {
 	// local/ content tree); they are ignored through .git/info/exclude because
 	// the set differs per machine.
 	machineLocal map[string]bool
+	// machineLocalDirs: the machineLocal entries that are directory outputs,
+	// ignored with a trailing slash.
+	machineLocalDirs map[string]bool
 	// inGitignore: machineLocal files that must go to the managed .gitignore
 	// block instead, because no exclude file can hold them (not a repository, or
 	// a path outside the work tree).
@@ -106,11 +112,14 @@ func (g *Generator) planLocal(profile string, merged []config.OutputFile) (*loca
 	baseline, baselineHash, err := g.renderBaseline(profile)
 	if err != nil {
 		err = redactCredentials(err)
-		// Fail closed even with --allow-local-drift: without the baseline,
-		// overlay-derived outputs cannot be told apart from shared ones.
+		// Fail closed, also with --allow-local-drift: without the baseline,
+		// overlay-derived outputs cannot be told apart from shared ones and would
+		// be written as shared (and committed).
 		return nil, oops.
-			Hint("Fix the shared config, or run with --no-local to generate the shared view").
-			Wrapf(err, "render the shared baseline to detect local drift (fix the shared config or use --no-local)")
+			Hint("Fix the shared config (run `ai-rulez lock` if the lock is stale; --allow-local-drift tolerates a "+
+				"stale lock for the includes the overlay replaces), or run with --no-local to generate the shared view").
+			Wrapf(err, "render the shared baseline to detect local drift (fix the shared config, use --allow-local-drift "+
+				"for a stale lock on a replaced include, or use --no-local)")
 	}
 
 	localHash, err := g.localSourceHash(baselineHash)
@@ -119,7 +128,7 @@ func (g *Generator) planLocal(profile string, merged []config.OutputFile) (*loca
 	}
 	plan := &localPlan{
 		baselineHash: baselineHash, localHash: localHash,
-		machineLocal: map[string]bool{}, inGitignore: map[string]bool{},
+		machineLocal: map[string]bool{}, machineLocalDirs: map[string]bool{}, inGitignore: map[string]bool{},
 	}
 	g.classify(plan, baseline, merged)
 	g.stampSourceHashes(plan, merged)
@@ -128,6 +137,48 @@ func (g *Generator) planLocal(profile string, merged []config.OutputFile) (*loca
 	g.plan = plan
 	plan.violations = g.findViolations(plan, merged)
 	return plan, nil
+}
+
+// overlayIncludeNames lists the includes the machine-local overlay declares or
+// replaces, for messages about a baseline that could not be rendered.
+func (g *Generator) overlayIncludeNames() []string {
+	if g.config.LocalOverlay == nil {
+		return nil
+	}
+	list, ok := g.config.LocalOverlay.Doc["includes"].([]any)
+	if !ok {
+		return nil
+	}
+	var names []string
+	for _, item := range list {
+		if entry, ok := item.(map[string]any); ok {
+			if name, ok := entry["name"].(string); ok && name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
+}
+
+// baselineLockPolicy is the lock policy for the shared baseline. With
+// --allow-local-drift the includes the overlay replaces are not held to their
+// lock entry: their content is replaced anyway, and a pending change to their
+// shared source (a lock that is stale until the shared module is pushed) must not
+// stop the baseline from classifying everything else. It returns the includes
+// waived, nil when the policy is unchanged.
+func (g *Generator) baselineLockPolicy() (policy config.LockPolicy, waived []string) {
+	policy = g.config.LockPolicy
+	if !g.allowLocalDrift {
+		return policy, nil
+	}
+	names := g.overlayIncludeNames()
+	if len(names) == 0 {
+		return policy, nil
+	}
+	policy.Unenforced = func(kind, name string) bool {
+		return kind == lockfile.KindInclude && slices.Contains(names, name)
+	}
+	return policy, names
 }
 
 // renderBaseline renders the shared view (no overlay, no local content) from a
@@ -140,8 +191,14 @@ func (g *Generator) renderBaseline(profile string) ([]config.OutputFile, string,
 		return nil, "", oops.Errorf("the config file location is unknown")
 	}
 	cfgPath := g.config.ConfigPath()
-	cfg, err := config.LoadConfigFromFile(g.ctx, cfgPath,
-		g.config.ReloadOptions(config.WithoutLocal(), config.WithHost(g.host()))...)
+	opts := g.config.ReloadOptions(config.WithoutLocal(), config.WithHost(g.host()))
+	if policy, waived := g.baselineLockPolicy(); waived != nil {
+		g.log().Warn("ai-rulez.lock is not enforced for includes the local overlay replaces; "+
+			"the lock is stale for them if their shared source changed (run `ai-rulez lock`)",
+			"includes", waived)
+		opts = append(opts, config.WithLockPolicy(policy))
+	}
+	cfg, err := config.LoadConfigFromFile(g.ctx, cfgPath, opts...)
 	if err != nil {
 		return nil, "", err //nolint:wrapcheck // wrapped by planLocal
 	}
@@ -197,21 +254,27 @@ func (g *Generator) classify(plan *localPlan, baseline, merged []config.OutputFi
 	}
 	for i := range merged {
 		o := &merged[i]
+		rel := filepath.ToSlash(g.convertToRelativePath(g.absOutputPath(o.Path)))
 		if o.IsDir {
+			// A directory is machine-local when the shared render writes nothing at or
+			// under it. A directory both renders produce stays shared. It is not a local-only file: it is neither checked against git's
+			// tracked set nor listed in the manifest.
+			if !g.baselineHasPath(baseline, base, rel) {
+				plan.machineLocal[rel] = true
+				plan.machineLocalDirs[rel] = true
+				o.LocalOnly = true
+			}
 			continue
 		}
-		rel := filepath.ToSlash(g.convertToRelativePath(g.absOutputPath(o.Path)))
 		b, inBase := base[rel]
 		switch {
 		case !inBase:
 			plan.localOnly = append(plan.localOnly, rel)
-			// A ".local." file name (CLAUDE.local.md, <rulesdir>/x.local.md) is
-			// covered by a stable pattern in the shared .gitignore. Anything else
-			// (a local skill's SKILL.md, an overlay preset's output) is named after
-			// machine-local content, so it is excluded per clone instead.
-			if !o.LocalOnly || !stableLocalName(rel) {
-				plan.machineLocal[rel] = true
-			}
+			// Every output the local inputs add is excluded per clone, a stable
+			// ".local." name (CLAUDE.local.md) included: the shared .gitignore
+			// block is committed, so it must not list a path only because this
+			// machine has local content.
+			plan.machineLocal[rel] = true
 			o.LocalOnly = true
 		case !sameOutput(b, *o):
 			plan.drift = append(plan.drift, rel)
@@ -220,6 +283,27 @@ func (g *Generator) classify(plan *localPlan, baseline, merged []config.OutputFi
 	for _, list := range [][]string{plan.baselineFiles, plan.localOnly, plan.drift, plan.suppressed} {
 		sort.Strings(list)
 	}
+}
+
+// baselineHasPath reports whether the shared render produces the directory rel
+// itself or any file under it.
+func (g *Generator) baselineHasPath(baseline []config.OutputFile, files map[string]config.OutputFile, rel string) bool {
+	prefix := strings.TrimSuffix(rel, "/") + "/"
+	for file := range files {
+		if strings.HasPrefix(file, prefix) {
+			return true
+		}
+	}
+	for _, o := range baseline {
+		if !o.IsDir {
+			continue
+		}
+		dir := filepath.ToSlash(g.convertToRelativePath(g.absOutputPath(o.Path)))
+		if dir == rel || strings.HasPrefix(dir, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func sameOutput(a, b config.OutputFile) bool {
@@ -485,19 +569,44 @@ func (g *Generator) machineExcludePatterns(plan *localPlan) (exclude string, pat
 	}
 
 	top := g.git().TopLevelContext(g.ctx, g.config.BaseDir)
-	if plan != nil {
-		for rel := range plan.machineLocal {
-			repoRel := gitutil.RepoRelative(top, filepath.Join(g.config.BaseDir, filepath.FromSlash(rel)))
-			if repoRel == "" || strings.ContainsAny(repoRel, "\r\n") {
-				// Never leave a local path unignored: the managed .gitignore takes it.
-				plan.inGitignore[rel] = true
-				continue
-			}
+	if !g.dropExcludes && g.manifestExcluded() {
+		if repoRel := gitutil.RepoRelative(top, g.localManifestPath()); repoRel != "" && !strings.ContainsAny(repoRel, "\r\n") {
 			patterns = append(patterns, "/"+escapeGitPattern(repoRel))
 		}
 	}
+	if plan != nil {
+		patterns = append(patterns, g.machineLocalPatterns(top, plan)...)
+	}
 	sort.Strings(patterns)
+	patterns = slices.Compact(patterns)
 	return exclude, patterns
+}
+
+// machineLocalPatterns returns the exclude patterns of the plan's machine-local
+// outputs, relative to the repository top. A path git's exclude file cannot take
+// is marked in plan.inGitignore instead.
+func (g *Generator) machineLocalPatterns(top string, plan *localPlan) []string {
+	var patterns []string
+	for rel := range plan.machineLocal {
+		repoRel := gitutil.RepoRelative(top, filepath.Join(g.config.BaseDir, filepath.FromSlash(rel)))
+		if repoRel == "" || strings.ContainsAny(repoRel, "\r\n") {
+			// Never leave a local path unignored: the managed .gitignore takes it.
+			plan.inGitignore[rel] = true
+			continue
+		}
+		if plan.machineLocalDirs[rel] {
+			patterns = append(patterns, "/"+escapeGitPattern(repoRel)+"/")
+			continue
+		}
+		// Local rule files share a folder with committed rules: one pattern
+		// per folder also covers the ones added later.
+		if stableLocalName(rel) && localGitignorePattern(g.config.RulesDirs, rel) != rel {
+			patterns = append(patterns, "/"+escapeGitPattern(path.Dir(repoRel))+"/*.local.*")
+			continue
+		}
+		patterns = append(patterns, "/"+escapeGitPattern(repoRel))
+	}
+	return patterns
 }
 
 // syncMachineExcludes makes .git/info/exclude hold exactly this project's
@@ -510,6 +619,8 @@ func (g *Generator) syncMachineExcludes(plan *localPlan) error {
 	if exclude == "" {
 		return nil
 	}
+	unlock := g.excludeLocks.lock(exclude)
+	defer unlock()
 
 	data, err := gitutil.ReadIgnoreFile(exclude)
 	if err != nil && !os.IsNotExist(err) {
@@ -535,6 +646,41 @@ func (g *Generator) syncMachineExcludes(plan *localPlan) error {
 	}
 	return nil
 }
+
+// ExcludeLocks serializes the read-modify-write of each .git/info/exclude file
+// among the generators that share it: the roots of a recursive run share their
+// repository's exclude file and sync their blocks concurrently, and an
+// unserialized rewrite drops another root's block (or, on Windows, fails the
+// rename). A nil *ExcludeLocks locks nothing.
+type ExcludeLocks struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+// NewExcludeLocks returns an empty set of per-file locks.
+func NewExcludeLocks() *ExcludeLocks {
+	return &ExcludeLocks{locks: map[string]*sync.Mutex{}}
+}
+
+func (l *ExcludeLocks) lock(exclude string) (unlock func()) {
+	if l == nil {
+		return func() {}
+	}
+	key := filepath.Clean(exclude)
+	l.mu.Lock()
+	mu, ok := l.locks[key]
+	if !ok {
+		mu = &sync.Mutex{}
+		l.locks[key] = mu
+	}
+	l.mu.Unlock()
+	mu.Lock()
+	return mu.Unlock
+}
+
+// SetExcludeLocks makes this generator take locks's lock before it rewrites the
+// repository's .git/info/exclude file.
+func (g *Generator) SetExcludeLocks(locks *ExcludeLocks) { g.excludeLocks = locks }
 
 // escapeGitPattern escapes a literal path for use in a gitignore pattern:
 // wildcard and bracket characters, a leading '#' or '!', and trailing spaces
@@ -621,7 +767,7 @@ func (g *Generator) guardLocal(profile string, outputs []config.OutputFile) erro
 			return err
 		}
 	}
-	if plan != nil || (!g.localSkipped && pathIsFile(g.localManifestPath())) {
+	if plan != nil || (!g.localSkipped && pathIsFile(g.localManifestPath())) || g.manifestExcluded() {
 		return g.syncMachineExcludes(plan)
 	}
 	return nil
@@ -630,9 +776,12 @@ func (g *Generator) guardLocal(profile string, outputs []config.OutputFile) erro
 // localOutputPattern is the managed-.gitignore pattern for a machine-local
 // output, or "" when .git/info/exclude holds it instead: overlay-derived paths
 // differ per machine, so they stay out of the shared .gitignore.
-func (g *Generator) localOutputPattern(relPath string) string {
+func (g *Generator) localOutputPattern(relPath string, isDir bool) string {
 	if g.plan != nil && g.plan.machineLocal[relPath] && !g.plan.inGitignore[relPath] {
 		return ""
+	}
+	if isDir {
+		return strings.TrimSuffix(relPath, "/") + "/"
 	}
 	return localGitignorePattern(g.config.RulesDirs, relPath)
 }

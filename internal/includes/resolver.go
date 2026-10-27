@@ -13,6 +13,7 @@ import (
 	"github.com/Goldziher/ai-rulez/v5/internal/lockfile"
 	"github.com/Goldziher/ai-rulez/v5/internal/logger"
 	"github.com/Goldziher/ai-rulez/v5/internal/okfbridge"
+	"github.com/Goldziher/ai-rulez/v5/internal/safefs"
 )
 
 const (
@@ -165,6 +166,8 @@ func (r *Resolver) processInclude(ctx context.Context, mergedContent **config.Co
 		return oops.Wrapf(err, "failed to fetch include '%s'", includeConf.Name)
 	}
 
+	includedContent = taggedWithInclude(includedContent, includeConf.Name)
+
 	// Merge content
 	merged, err := r.mergeContent(*mergedContent, includedContent, includeConf.MergeStrategy, includeConf.InstallTo)
 	if err != nil {
@@ -223,9 +226,20 @@ func (r *Resolver) createSource(ctx context.Context, includeConf *config.Include
 		if err := checkInsideProject(r.cfg, r.baseDir, "source", includeConf.Name, includeConf.Source); err != nil {
 			return nil, err
 		}
+		dir, err := safefs.SubPath(includeConf.Source, includeConf.Path)
+		if err != nil {
+			return nil, oops.With("include", includeConf.Name).With("path", includeConf.Path).
+				Hint("`path` is a subdirectory of `source`; it cannot contain `..`").
+				Wrapf(err, "include %q", includeConf.Name)
+		}
+		if dir != includeConf.Source {
+			if err := CheckLocalDir(r.cfg, r.baseDir, includeConf); err != nil {
+				return nil, err
+			}
+		}
 		return NewLocalSource(
 			includeConf.Name,
-			includeConf.Source,
+			dir,
 			r.baseDir,
 			includeConf.Include,
 		).In(viewFor(r.cfg, r.baseDir)), nil
@@ -566,4 +580,30 @@ func (r *Resolver) host() ambient.Host {
 		return ambient.Host{}
 	}
 	return r.cfg.Host
+}
+
+// taggedWithInclude returns a copy of the tree whose rules and context name the
+// include they came from, so generation can group them by origin. The fetched
+// tree may be shared through the run's memo, so it is not modified.
+func taggedWithInclude(tree *config.ContentTree, name string) *config.ContentTree {
+	tagged := *tree
+	tagged.Rules = tagFiles(tree.Rules, name)
+	tagged.Context = tagFiles(tree.Context, name)
+	tagged.Domains = make(map[string]*config.Domain, len(tree.Domains))
+	for domainName, domain := range tree.Domains {
+		copied := *domain
+		copied.Rules = tagFiles(domain.Rules, name)
+		copied.Context = tagFiles(domain.Context, name)
+		tagged.Domains[domainName] = &copied
+	}
+	return &tagged
+}
+
+func tagFiles(files []config.ContentFile, name string) []config.ContentFile {
+	out := make([]config.ContentFile, len(files))
+	copy(out, files)
+	for idx := range out {
+		out[idx].Include = name
+	}
+	return out
 }

@@ -541,17 +541,17 @@ directory entry (`!.claude/skills/`, `!/.claude/skills/`) is honored the same wa
 way, since `generate` leaves it alone; it still reports a machine-local or secret output a rule un-ignores, and says
 that `generate` will not re-ignore it.
 
-The machine-local manifest, `.ai-rulez/.generated-manifest.local.json`, is the one entry that is always written: it
-is ignored whenever it exists in a repository (and whenever a run writes it), even with `gitignore = false`, without
-adding `.ai-rulez/local/` or the overlay patterns.
+With `gitignore = true` the block is the same on every machine, whether or not `config.local.*` or `.ai-rulez/local/`
+exist and with or without `generate --no-local`: it always lists `.ai-rulez/config.local.*` with its
+`.config.local.*` lock and temp files, `.ai-rulez/local/` and `.ai-rulez/.generated-manifest.local.json`. A path that
+exists only because this machine's local inputs add it (`CLAUDE.local.md`, `AGENTS.local.md`, `GEMINI.local.md`,
+`AGENTS.override.md`, `<rulesdir>/*.local.*`, a `.claude/settings.json` that only the overlay's hooks create, local
+skills) is never listed: it is excluded through `.git/info/exclude`, which is not committed.
 
-Machine-local outputs and sources are **always** gitignored, even when `gitignore = false`; an entry is added
-when the file or directory exists, so a project without a `config.local.*` overlay or `.ai-rulez/local/` tree gets
-no line for it: the local outputs (`CLAUDE.local.md`, `AGENTS.local.md`, `GEMINI.local.md`, `AGENTS.override.md`,
-`<rulesdir>/*.local.*` including `ai-rulez.local.*`), the `.ai-rulez/local/` source tree, the
-`config.local.*` overlay with its `.config.local.*` lock and temp files, and
-`.ai-rulez/.generated-manifest.local.json`. Overlay-derived outputs whose names differ per machine are
-excluded through `.git/info/exclude` instead. See [Local Configuration](local-overrides.md).
+With `gitignore = false` the machine-local inputs that exist (the `config.local.*` overlay, the `.ai-rulez/local/`
+tree) are still gitignored in the project's `.gitignore`. The machine-local manifest alone does not make `generate`
+write a tracked `.gitignore`: it is excluded through `.git/info/exclude` instead. See
+[Local Configuration](local-overrides.md).
 
 `gitignore` defaults to `false`, so generated files are normally committed; set it to `true` when the team
 keeps generated output out of git and regenerates it locally.
@@ -1135,7 +1135,22 @@ in `.claude/settings.json`, merged like `mcpServers` (see
 ```toml
 [claude.settings]
 manage = true
-enable_plugins = ["acme-essentials"]
+enable_plugins = ["acme-essentials"]    # or a qualified "name@marketplace" of another marketplace
+```
+
+### `enabled_plugins`
+
+Enables a plugin from another marketplace for the `claude`, `codex` and `opencode` presets from one entry:
+`.claude/settings.json` gets `enabledPlugins` (and `extraKnownMarketplaces` with `marketplace`), `.codex/config.toml`
+a `[plugins."<id>"]` table and `opencode.json` the `opencode` npm package in `plugin`. Merged like the other
+settings documents (see [Settings document merge behavior](#settings-document-merge-behavior)). See
+[Enable a plugin from another marketplace](plugins.md#enable-a-plugin-from-another-marketplace).
+
+```toml
+[[enabled_plugins]]
+id = "basemind@basemind"
+marketplace = { name = "basemind", source = "Goldziher/basemind", type = "github" }
+opencode = "basemind-opencode"
 ```
 
 ### `claude.skills`
@@ -1522,6 +1537,7 @@ claude = "inline"
 - **`rules.mode`**: `split` (the default) writes one file per rule in the tool's native rules folder; `inline` embeds rules in the root file, moving only path-scoped rules to the folder.
 - **`rules.mode_by_preset`**: per-preset override that beats `rules.mode`. Keys are built-in, custom, or provider preset names.
 - **`rules.scoped_fallback`**: how the shared `AGENTS.md` (`agents_md = true`) serves glob-scoped rules and context to presets without a rules folder (`codex`, `opencode`, `pi`, ...). `inline` (the default) inlines them with an `_Applies to:_` line, so every preset that reads or imports `AGENTS.md` loads them at start; `skill` writes each one to `.agents/skills` as a skill gated by its `paths`. See [Rules](rules.md#glob-scoped-rules-and-agentsmd).
+- **`rules.scoped_fallback_group`**: with `scoped_fallback = "skill"`, folds the fallback skills so the skill listing stays short. `none` (the default) writes one skill per item; `include` writes one `scoped-<include>` skill per include or builtin pack; `directory` writes one `scoped-<dir>` skill per directory the globs point into. A grouped skill's `paths` are the union of its items' globs. A rule or context item with `fallback: false` in its frontmatter stays out of the fallback. See [Keeping the skill listing short](rules.md#keeping-the-skill-listing-short).
 - **`rules.baz_scoped`**: `nested` (the default) writes the path-scoped rules and context of the `baz` preset to the `AGENTS.md` of the directory their globs point into; `root` keeps them in the root `AGENTS.md`. See [Baz](baz.md).
 - **`rules.baz_default`**: `all` (the default) nests every path-scoped item into the Baz directory files; `none` nests only items whose `targets` select `baz`, leaving the rest in the root `AGENTS.md`.
 - **`rules.baz.include`**: with `baz_default = "none"`, the rule and context names (list) that are nested for Baz in addition to the items whose `targets` select `baz`; `baz: true` in an item's frontmatter does the same. A `!baz` entry in `targets` always keeps an item out of the Baz nested files. See [Baz](baz.md#per-rule-opt-in-and-opt-out).

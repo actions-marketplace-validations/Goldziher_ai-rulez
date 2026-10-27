@@ -46,9 +46,12 @@ type Config struct {
 	// or straight from a repository (see docs/installed-plugins.md).
 	InstalledMarketplaces []InstalledMarketplaceConfig `yaml:"installed_marketplaces,omitempty" json:"installed_marketplaces,omitempty" toml:"installed_marketplaces,omitempty"` //nolint:tagliatelle
 	InstalledPlugins      []InstalledPluginConfig      `yaml:"installed_plugins,omitempty" json:"installed_plugins,omitempty" toml:"installed_plugins,omitempty"`                //nolint:tagliatelle
-	Header                *HeaderConfig                `yaml:"header,omitempty" json:"header,omitempty" toml:"header,omitempty"`
-	Defaults              *DefaultsConfig              `yaml:"defaults,omitempty" json:"defaults,omitempty" toml:"defaults,omitempty"`
-	Builtins              *BuiltinsConfig              `yaml:"builtins,omitempty" json:"builtins,omitempty" toml:"builtins,omitempty"`
+	// EnabledPlugins switches on plugins from other marketplaces for the Claude
+	// Code, Codex and OpenCode presets (see docs/plugins.md).
+	EnabledPlugins []EnabledPlugin `yaml:"enabled_plugins,omitempty" json:"enabled_plugins,omitempty" toml:"enabled_plugins,omitempty"` //nolint:tagliatelle
+	Header         *HeaderConfig   `yaml:"header,omitempty" json:"header,omitempty" toml:"header,omitempty"`
+	Defaults       *DefaultsConfig `yaml:"defaults,omitempty" json:"defaults,omitempty" toml:"defaults,omitempty"`
+	Builtins       *BuiltinsConfig `yaml:"builtins,omitempty" json:"builtins,omitempty" toml:"builtins,omitempty"`
 	// SkipOutputs lists output kinds ai-rulez never writes, overwrites or deletes
 	// ("instructions", "agents_md", "claude_md", "rules", "skills", "agents",
 	// "commands"); see skip_outputs.go.
@@ -318,6 +321,15 @@ func (c *Config) HasPluginAuthoring() bool {
 	return c.Plugin != nil || c.HasPluginSet()
 }
 
+// IsPluginAuthoringRoot reports whether the root exists to build plugin
+// bundles: it authors a plugin or marketplace (HasPluginAuthoring, the same
+// test `generate --plugin` uses to decide it has something to build) and
+// configures no preset. A root that keeps a preset also generates harness
+// files for its own project, so a normal generate stays correct there.
+func (c *Config) IsPluginAuthoringRoot() bool {
+	return c != nil && len(c.Presets) == 0 && c.HasPluginAuthoring()
+}
+
 // LintOnly reports whether the configuration declares no preset and authors no
 // plugin: ai-rulez is used only to validate, scan and run [[lint.external]], and
 // generate has nothing to render.
@@ -438,9 +450,10 @@ type MCPConfig struct {
 
 // HasSelfServer reports whether generation should add ai-rulez's own MCP server.
 // It is on by default: only an explicit self_server = false (or --no-self-mcp)
-// turns it off.
+// turns it off. A plugin-authoring root (IsPluginAuthoringRoot) never gets it:
+// its .mcp.json belongs to the shipped bundle, which declares its own servers.
 func (c *Config) HasSelfServer() bool {
-	if c == nil {
+	if c == nil || c.IsPluginAuthoringRoot() {
 		return false
 	}
 	if c.MCP == nil || c.MCP.SelfServer == nil {
@@ -747,6 +760,13 @@ type RulesConfig struct {
 	// instead, so they load on demand. See ScopedFallbackRules.
 	ScopedFallback string `yaml:"scoped_fallback,omitempty" json:"scoped_fallback,omitempty" toml:"scoped_fallback,omitempty"` //nolint:tagliatelle
 
+	// ScopedFallbackGroup folds the skills scoped_fallback = "skill" writes into
+	// fewer ones, so the skill listing a harness budgets stays short: "none" (the
+	// default) writes one skill per item, "include" one per include or builtin
+	// pack, "directory" one per directory the item's globs point into. See
+	// ScopedFallbackGrouping.
+	ScopedFallbackGroup string `yaml:"scoped_fallback_group,omitempty" json:"scoped_fallback_group,omitempty" toml:"scoped_fallback_group,omitempty"` //nolint:tagliatelle
+
 	// Baz holds per-rule controls for the baz preset ([rules.baz]).
 	Baz *BazRulesConfig `yaml:"baz,omitempty" json:"baz,omitempty" toml:"baz,omitempty"`
 }
@@ -796,6 +816,23 @@ const (
 	ScopedFallbackInline = "inline"
 	ScopedFallbackSkill  = "skill"
 )
+
+// Values of rules.scoped_fallback_group.
+const (
+	ScopedFallbackGroupNone      = "none"
+	ScopedFallbackGroupInclude   = "include"
+	ScopedFallbackGroupDirectory = "directory"
+)
+
+// ScopedFallbackGrouping returns how scoped_fallback = "skill" groups its
+// skills: ScopedFallbackGroupNone unless rules.scoped_fallback_group says
+// otherwise.
+func (c *Config) ScopedFallbackGrouping() string {
+	if c != nil && c.Rules != nil && c.Rules.ScopedFallbackGroup != "" {
+		return c.Rules.ScopedFallbackGroup
+	}
+	return ScopedFallbackGroupNone
+}
 
 // ScopedFallbackRules returns how the shared AGENTS.md serves glob-scoped items
 // to presets without a rules folder: ScopedFallbackInline unless

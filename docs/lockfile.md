@@ -391,6 +391,15 @@ pins and content pins of other items are not recomputed (as with `lock <name>`):
   `ai-rulez lock` runs the same scan over every remote tree it pins to something new (a new entry, or a changed
   commit or digest; unchanged pins were scanned when pinned) and takes the same `--accept-findings`.
 
+#### From an MCP client
+
+The MCP server has a tool for each read of this section: `lock_outdated` (`lock --outdated`), `update_plan`
+(`update --dry-run`) and `lock_diff` (`lock --diff`), and one that moves pins, `update`. They run the same code, so
+the scan before pinning and the refusals above apply, and a refusal comes back as an error result carrying the update
+document with nothing written. Consent (`--accept-moved-tag`, `--accept-findings`, `--allow-downgrade`, `--major`) is
+not a tool argument: it stays on the command line. A read-only server lists all but `update`. See
+[Pin Tools](mcp-server.md#pin-tools-lock_outdated-update_plan-update).
+
 #### Taking a new major version
 
 `update --major` looks at the sources that have a newer major version than their constraint allows, and prints the
@@ -766,7 +775,7 @@ jobs:
   outdated:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: npm install -g ai-rulez            # or: uvx ai-rulez
       - name: Report outdated sources
         env:
@@ -776,14 +785,16 @@ jobs:
       - name: Verify pinned tags did not move
         run: ai-rulez lock --check --verify-tags
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: outdated
           path: outdated.json
 ```
 
 `--fail-on-outdated` exits `2` when any source has an allowed update, so the job turns red until someone runs
-`ai-rulez update` and merges the lock; a moved or deleted tag and an unsatisfiable constraint fail it too. To report
+`ai-rulez update` and merges the lock; a moved or deleted tag and an unsatisfiable constraint fail it too. To have CI
+run the update and open the pull request itself, use the
+[`Goldziher/ai-rulez/update@v5` sub-action](github-actions.md#scheduled-pin-updates-update). To report
 without failing, drop the flag and read `summary.updatable` and `summary.held_back` from the JSON. To make "outdated"
 a finding instead, turn on `AR734` and let the exit code gate:
 

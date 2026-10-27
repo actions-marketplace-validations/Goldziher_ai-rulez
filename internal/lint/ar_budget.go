@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Goldziher/ai-rulez/v5/internal/config"
+	"github.com/Goldziher/ai-rulez/v5/internal/generator/presets"
 )
 
 // CodeLoadBudget reports content that a harness truncates or drops when it loads
@@ -67,12 +70,12 @@ func LoadBudgetDefault(id string) int {
 	return 0
 }
 
-func (b loadBudget) applies(presets map[string]bool) bool {
+func (b loadBudget) applies(configured map[string]bool) bool {
 	if b.CoveredBy != "" {
 		return false
 	}
 	for _, p := range b.Presets {
-		if presets[p] {
+		if configured[p] {
 			return true
 		}
 	}
@@ -90,22 +93,24 @@ func measure(unit, text string) int {
 }
 
 func checkLoadBudgets(r *runner) { //nolint:gocyclo // linear checks over a documented schema; splitting them hides the rules
-	presets := r.presetNames()
+	configured := r.presetNames()
 	cfgPath := r.configFilePath()
 	cfgLines := r.fileLines(cfgPath)
 	for i := range loadBudgets {
 		own := loadBudgets[i]
 		b := &own
-		if !b.applies(presets) {
+		if !b.applies(configured) {
 			continue
 		}
 		if v := r.lc.LoadBudgets[b.ID]; v > 0 {
 			b.Limit = v
 		}
-		total, name := 0, 0
+		total, name, imported := 0, 0, 0
 		for i := range r.items {
 			it := &r.items[i]
-			if !it.owned || it.isDoc || (it.targetOnly && r.pathIgnored(it.abs)) {
+			// Sums measure what the harness loads, so included and installed items
+			// count; a finding on a single file is only raised for files the user owns.
+			if it.isDoc || (it.targetOnly && r.pathIgnored(it.abs)) {
 				continue
 			}
 			switch b.Scope {
@@ -117,11 +122,18 @@ func checkLoadBudgets(r *runner) { //nolint:gocyclo // linear checks over a docu
 				if it.cf.Metadata != nil {
 					desc += it.cf.Metadata.Extra["when_to_use"]
 				}
-				if n := measure(b.Unit, desc); n > b.Limit {
+				n := measure(b.Unit, desc)
+				if n > b.Limit && !it.owned && cfgPath != "" {
+					r.add(CodeLoadBudget, cfgPath, 1,
+						"the %s skill from an include or installed skill has a description and when_to_use of %d %s, past the %d-%s cap of the %s skill listing (%s); the rest is cut off", itemID(it.kind, it.cf), n, b.Unit, b.Limit, b.Unit, b.presetLabel(), b.Source)
+				} else if n > b.Limit && it.owned {
 					r.add(CodeLoadBudget, it.abs, r.docs[it.abs].lineOf(keyDescription, 1),
 						"description and when_to_use are %d %s, past the %d-%s cap of the %s skill listing (%s); the rest is cut off", n, b.Unit, b.Limit, b.Unit, b.presetLabel(), b.Source)
 				}
 			case scopeFile:
+				if !it.owned {
+					continue
+				}
 				if it.kind != kindRule && it.kind != kindContext {
 					continue
 				}
@@ -136,9 +148,20 @@ func checkLoadBudgets(r *runner) { //nolint:gocyclo // linear checks over a docu
 				if it.kind == kindSkill {
 					total += measure(b.Unit, skillListingName(it)+r.description(it))
 					name++
+					if !it.owned {
+						imported++
+					}
 				}
 			}
 		}
+		fallback := 0
+		if b.Scope == keySkills {
+			var extra int
+			extra, fallback = r.fallbackListing(b.Unit)
+			total += extra
+			name += fallback
+		}
+		note := fallbackNote(fallback) + importedNote(imported)
 		if b.Scope != scopeChain && b.Scope != keySkills || cfgPath == "" {
 			continue
 		}
@@ -155,9 +178,59 @@ func checkLoadBudgets(r *runner) { //nolint:gocyclo // linear checks over a docu
 		case total*10 >= b.Limit*9 && b.Scope == scopeChain:
 			r.addSev(SeverityInfo, CodeLoadBudget, cfgPath, at, "rules and context add up to %d of %d %s, within 10%% of the AGENTS.md chain limit of %s (%s)", total, b.Limit, b.Unit, b.presetLabel(), b.Source)
 		case total > b.Limit && b.Scope == keySkills:
-			r.addSev(SeverityInfo, CodeLoadBudget, cfgPath, at, "the %d skill names and descriptions add up to %d %s; %s lists skills within about 2%% of the context window (%d %s when the window is unknown, %s)", name, total, b.Unit, b.presetLabel(), b.Limit, b.Unit, b.Source)
+			r.add(CodeLoadBudget, cfgPath, at, "the %d skill names and descriptions%s add up to %d %s, past the %d-%s listing budget %s gives skills (about 2%% of the context window, %s); skills past it are cut from the listing%s",
+				name, note, total, b.Unit, b.Limit, b.Unit, b.presetLabel(), b.Source, fallbackAdvice(fallback))
+		case total*10 >= b.Limit*9 && b.Scope == keySkills:
+			r.addSev(SeverityInfo, CodeLoadBudget, cfgPath, at, "the %d skill names and descriptions%s add up to %d of %d %s, within 10%% of the skill listing budget of %s (%s)",
+				name, fallbackNote(fallback), total, b.Limit, b.Unit, b.presetLabel(), b.Source)
 		}
 	}
+}
+
+// scopedFallbackSkills is the skills rules.scoped_fallback = "skill" would write
+// for the project, minus the ones an authored skill or command already names;
+// they count toward the skill listing of the harnesses that read .agents/skills.
+// The skills are built once per run: each skill-listing budget asks for them.
+func (r *runner) scopedFallbackSkills() []config.ContentFile {
+	r.fallbackOnce.Do(func() {
+		if r.cfg == nil || r.cfg.Content == nil || !config.SharedAgentsMDInlining(r.cfg).ScopedAsSkills {
+			return
+		}
+		r.fallbackMemo = presets.ScopedFallbackSkillsUnclaimed(r.cfg.Content, r.cfg, r.cfg.AgentsMDOwners(), nil)
+	})
+	return r.fallbackMemo
+}
+
+// fallbackListing is the size, in unit, of the skill listing entries of the
+// scoped-fallback skills and how many there are.
+func (r *runner) fallbackListing(unit string) (size, count int) {
+	skills := r.scopedFallbackSkills()
+	for i := range skills {
+		size += measure(unit, skills[i].ID+" "+config.SkillDescription(skills[i].Metadata))
+		count++
+	}
+	return size, count
+}
+
+func fallbackNote(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d of them scoped-fallback skills for glob-scoped rules and context)", n)
+}
+
+func importedNote(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d of them from includes or installed skills)", n)
+}
+
+func fallbackAdvice(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return "; set [rules] scoped_fallback_group to fold them into fewer skills, or fallback: false on an item to keep it out"
 }
 
 func skillListingName(it *item) string { return itemID(it.kind, it.cf) + " " }

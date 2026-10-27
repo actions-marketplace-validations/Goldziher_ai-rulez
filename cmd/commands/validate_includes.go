@@ -1,13 +1,12 @@
 package commands
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/samber/oops"
 
 	"github.com/Goldziher/ai-rulez/v5/internal/config"
+	"github.com/Goldziher/ai-rulez/v5/internal/includes"
 	"github.com/Goldziher/ai-rulez/v5/internal/lockfile"
 )
 
@@ -23,16 +22,8 @@ func checkLocalIncludes(cfg *config.Config) error {
 		if inc.Source == "" || inc.LocalOverride != "" || lockfile.IsGitSource(inc.Source) {
 			continue
 		}
-		src := inc.Source
-		if !filepath.IsAbs(src) {
-			src = filepath.Join(cfg.BaseDir, src)
-		}
-		info, err := os.Stat(filepath.Clean(src))
-		switch {
-		case err != nil:
-			problems = append(problems, "include "+inc.Name+": path "+inc.Source+" not found")
-		case !info.IsDir():
-			problems = append(problems, "include "+inc.Name+": path "+inc.Source+" is not a directory")
+		if err := includes.CheckLocalDir(cfg, cfg.BaseDir, inc); err != nil {
+			problems = append(problems, err.Error())
 		}
 	}
 	if len(problems) == 0 {

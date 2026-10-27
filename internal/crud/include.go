@@ -63,6 +63,12 @@ func (op *OperatorImpl) AddInclude(ctx context.Context, req *AddIncludeRequest) 
 		if err := incl.CheckLocalInsideProject(op.baseDir, req.Name, req.Source); err != nil {
 			return err //nolint:wrapcheck // already contextual
 		}
+		if req.Path != "" {
+			probe := config.IncludeConfig{Name: req.Name, Source: req.Source, Path: req.Path}
+			if err := incl.CheckLocalDir(nil, op.baseDir, &probe); err != nil {
+				return err //nolint:wrapcheck // already contextual
+			}
+		}
 	}
 
 	// Create the include config entry
