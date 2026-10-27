@@ -61,7 +61,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Changed
 
 - **Dependencies are upgraded and the GitHub Actions are pinned to major tags.** Go modules include oras-go
-  2.7.0, liter-llm 2.4.0 and tiktoken-go/tokenizer 0.10.0; the docs lockfile, pnpm 12.15.0 and golangci-lint
+  2.7.0, liter-llm 2.4.1 and tiktoken-go/tokenizer 0.10.0; the docs lockfile, pnpm 12.15.0 and golangci-lint
   v2.15.0 are current. Workflow and action references use `@vN` (`actions/checkout@v7`), and setup-uv keeps a full
   tag because it publishes no major tag.
 - **The floating `v5` action tag is now an annotated tag pushed with `--force-with-lease`.** After a stable
@@ -131,7 +131,8 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
   Fixes #497.
 - **Roots of one repository no longer drop each other's `.git/info/exclude` block in `generate --recursive`.** The
   roots rewrote the shared exclude file concurrently, so one root's rewrite could remove another root's block (on
-  Windows the rename failed with "Access is denied"). The rewrites are now serialized.
+  Windows the rename failed with "Access is denied"). The rewrites are now serialized, and on Windows a rename that a
+  `git` reading the file blocks is retried for up to about two seconds.
 - **Built-in name tables match their upstream docs again.** Antigravity lists `/codesearch`, `/plan` and `/grill-me`
   in its CLI reference table and no longer lists `/fast` or `/planning`, so the hand-kept groups for the first three
   are folded into the generated one. Command Code adds `/btw`, Kimi Code `/import-sessions`, and Devin drops `/loop`
