@@ -611,3 +611,115 @@ func TestFindContext_SummaryNamesTheGlobsOfARule(t *testing.T) {
 	assert.Equal(t, []any{"**/*.go"}, byName["go"]["paths"])
 	assert.NotContains(t, byName["style"], "paths")
 }
+
+// A rule whose frontmatter has a YAML type error (a complex key) still decodes
+// its other keys, so the served rule keeps its paths gate and its description.
+func TestFindContext_ATypeErrorInTheFrontmatterKeepsTheGate(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want []string
+	}{
+		{name: "a file the glob names", path: "cmd/main.go", want: []string{"rule:.:partly", "rule:.:style"}},
+		{name: "a file the glob does not name", path: "README.md", want: []string{"rule:.:style"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := monorepoProject(t)
+			writeFile(t, root, ".claude/rules/partly.md", "---\ndescription: Partly decoded\n? [a, b]\n: v\npaths:\n  - \"**/*.go\"\n---\n\nGo rules.\n")
+			_, session := contextServer(t, root)
+
+			// Act
+			out, isErr := toolJSON(t, session, "find_context", map[string]any{"path": tt.path, "kind": "rule"})
+
+			// Assert
+			require.False(t, isErr, "%v", out)
+			assert.Equal(t, tt.want, contextKeys(t, out))
+		})
+	}
+}
+
+// A rule whose frontmatter does not parse but names `paths:` has lost its gate:
+// where it applies cannot be known, so a path query never returns it (fail
+// closed) and a scope query lists it marked paths_unreadable, not as a rule
+// that applies everywhere.
+func TestFindContext_ABrokenGateFailsClosed(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]any
+		want []string
+	}{
+		{name: "a file the lost glob may have named", args: map[string]any{"path": "cmd/main.go", "kind": "rule"}, want: []string{"rule:.:style"}},
+		{name: "a directory", args: map[string]any{"path": "cmd", "kind": "rule"}, want: []string{"rule:.:style"}},
+		{name: "a scope query lists it", args: map[string]any{"scope": ".", "kind": "rule"}, want: []string{"rule:.:broken", "rule:.:style"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := monorepoProject(t)
+			writeFile(t, root, ".claude/rules/broken.md", "---\ndescription: Go rules: broken\npaths:\n  - \"**/*.go\"\n---\n\nGo rules.\n")
+			_, session := contextServer(t, root)
+
+			// Act
+			out, isErr := toolJSON(t, session, "find_context", tt.args)
+
+			// Assert
+			require.False(t, isErr, "%v", out)
+			assert.Equal(t, tt.want, contextKeys(t, out))
+		})
+	}
+}
+
+func TestFindContext_SummaryMarksALostGate(t *testing.T) {
+	// Arrange
+	root := monorepoProject(t)
+	writeFile(t, root, ".claude/rules/broken.md", "---\ndescription: Go rules: broken\npaths: [\"**/*.go\"]\n---\n\nGo rules.\n")
+	writeFile(t, root, ".claude/rules/plain.md", "---\ndescription: Go rules: no gate\n---\n\nGo rules.\n")
+	_, session := contextServer(t, root)
+
+	// Act
+	out, isErr := toolJSON(t, session, "find_context", map[string]any{"scope": ".", "kind": "rule"})
+
+	// Assert
+	require.False(t, isErr, "%v", out)
+	results, _ := out["results"].([]any)
+	byName := map[string]map[string]any{}
+	for _, r := range results {
+		m := r.(map[string]any)
+		byName[m["name"].(string)] = m
+	}
+	require.Contains(t, byName, "broken")
+	require.Contains(t, byName, "plain")
+	assert.Equal(t, true, byName["broken"]["paths_unreadable"])
+	assert.NotContains(t, byName["broken"], "paths")
+	assert.NotContains(t, byName["plain"], "paths_unreadable", "a broken block that names no paths is not marked")
+}
+
+// A rule whose frontmatter parses but whose paths value is not a string or a list of strings has lost its gate as
+// surely as a broken block: a path query never returns it, and a scope query lists it marked paths_unreadable.
+func TestFindContext_AMistypedGateFailsClosed(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]any
+		want []string
+	}{
+		{name: "a file", args: map[string]any{"path": "cmd/main.go", "kind": "rule"}, want: []string{"rule:.:style"}},
+		{name: "a scope query lists it", args: map[string]any{"scope": ".", "kind": "rule"}, want: []string{"rule:.:numbered", "rule:.:style"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := monorepoProject(t)
+			writeFile(t, root, ".claude/rules/numbered.md", "---\ndescription: Go rules\npaths: 5\n---\n\nGo rules.\n")
+			_, session := contextServer(t, root)
+
+			// Act
+			out, isErr := toolJSON(t, session, "find_context", tt.args)
+
+			// Assert
+			require.False(t, isErr, "%v", out)
+			assert.Equal(t, tt.want, contextKeys(t, out))
+		})
+	}
+}

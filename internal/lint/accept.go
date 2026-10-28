@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/Goldziher/ai-rulez/v5/internal/config"
+	"github.com/Goldziher/ai-rulez/v5/internal/gitutil"
+	"github.com/Goldziher/ai-rulez/v5/internal/safefs"
 )
 
 // CodeAcceptUnused is AR9I0, the [[lint.accept]] entry that accepted nothing.
@@ -93,10 +95,18 @@ func (r *runner) applyAccepts() {
 	}
 	for _, e := range entries {
 		if !e.used && r.acceptJudgeable(e) {
-			r.add(CodeAcceptUnused, r.configFilePath(), 1,
-				"lint.accept[%d] (%s in %s) accepted no finding; remove it or fix its path or match", e.index, e.cfg.Rule, e.cfg.Path)
+			msg := fmt.Sprintf("lint.accept[%d] (%s in %s) accepted no finding; remove it or fix its path or match", e.index, e.cfg.Rule, e.cfg.Path)
+			// Recorded whether or not AR9I0 is reported, so `exposure leakage` fails on it with AR9I0 off.
+			r.staleAccepts = append(r.staleAccepts, staleAccept{code: e.code, message: msg})
+			r.add(CodeAcceptUnused, r.configFilePath(), 1, "%s", msg)
 		}
 	}
+}
+
+// staleAccept is a [[lint.accept]] entry of the rule code reported as AR9I0
+// with message.
+type staleAccept struct {
+	code, message string
 }
 
 // acceptJudgeable reports whether this run could have produced the finding the
@@ -108,6 +118,9 @@ func (r *runner) acceptJudgeable(e *acceptEntry) bool {
 		return false
 	}
 	if r.sel != nil && !r.sel[AnalyzerFor(e.code).Name] {
+		return false
+	}
+	if !r.acceptInExposureScope(e) {
 		return false
 	}
 	// The entry is judged when its path matches a file this run linted, or
@@ -132,6 +145,27 @@ func (r *runner) acceptJudgeable(e *acceptEntry) bool {
 		}
 	}
 	return true
+}
+
+// acceptInExposureScope reports whether the entry of an exposure rule can be judged. A session exposure source
+// rooted below the project (exposure leakage --root) inventories only that directory, so an entry whose path
+// matches no indexed file under it accepts nothing there without being stale.
+func (r *runner) acceptInExposureScope(e *acceptEntry) bool {
+	if r.exposure == nil || AnalyzerFor(e.code).Name != AnalyzerExposure {
+		return true
+	}
+	root := r.exposureRoot()
+	prefix, err := filepath.Rel(gitutil.Resolve(r.tree.Top), gitutil.Resolve(root))
+	if err != nil || prefix == "." || safefs.RelEscapes(prefix) {
+		return true
+	}
+	prefix = filepath.ToSlash(prefix) + "/"
+	for _, rel := range r.tree.Paths() {
+		if strings.HasPrefix(rel, prefix) && r.pathMatches(filepath.Join(r.tree.Top, filepath.FromSlash(rel)), e.path) {
+			return true
+		}
+	}
+	return false
 }
 
 // validateAccepts reports entries that would silently match nothing or accept

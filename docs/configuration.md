@@ -1646,6 +1646,25 @@ command_env = []              # extra environment variable names passed to comma
 Credential-looking and proxy names in `command_env` and unknown includes in `trust_exec_from` are configuration errors.
 The table is pinned in the lock. See [Verifiers](verifiers.md#settings).
 
+### `exposure`
+
+Describes the areas of a repository (the directories each one claims, its owner and the words that name it) for the
+session exposure checks. The map is inline or in `areas_file`, not both; `validate` reports a map it cannot use as
+`AR9W5`, area terms in the text a session sees at its start as `AR9W0` and `AR9W1` (accepted with `[[lint.accept]]`),
+and `skill_areas` keys that name no skill as `AR9W6`; `collision_min_score` turns on `AR9W2` for start-listed skills
+and agents of different areas whose listings overlap (the 20 highest pairs, then one finding for the rest). `start_budget` caps the estimated tokens a session loads at
+start (`AR9W3`), and `context_window` sizes the skill listing budget `AR964` checks. Without the table nothing
+changes. See
+[Session exposure and areas](exposure.md).
+
+```toml
+[exposure]
+areas_file = "tools/context/areas.toml"   # [[area]] tables and [skill_areas], relative to the project root
+collision_min_score = 0.2                 # AR9W2 at warning; 0 (default) is off
+context_window = 200000                   # tokens; the skill listing budget is 1% of it at 4 characters per token
+start_budget = 6000                       # AR9W3 above 6000 estimated start tokens; 0 (default) is off
+```
+
 ### `header`
 
 Configures the style of headers in generated files. Headers provide context about ai-rulez, explain the folder structure, and instruct AI agents on proper usage.

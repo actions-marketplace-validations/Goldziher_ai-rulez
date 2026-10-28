@@ -708,3 +708,183 @@ func TestBuild_SkillPathsSurviveTheCache(t *testing.T) {
 	require.NotNil(t, ix.Items()[0].Only)
 	assert.Equal(t, []string{"src/**"}, ix.Items()[0].Only.Paths, "a cache hit keeps the paths")
 }
+
+func TestBuild_FrontmatterParseErrorIsKept(t *testing.T) {
+	tests := []struct {
+		name       string
+		file       string
+		content    string
+		wantError  string
+		unreadable bool
+	}{
+		{name: "valid frontmatter", content: "---\ndescription: A skill\npaths: [src/**]\n---\nBody.\n"},
+		{name: "no frontmatter", content: "# A skill\n"},
+		{name: "invalid YAML naming paths", content: "---\ndescription: Use when: deploying\npaths: [src/**]\n---\nBody.\n", wantError: "mapping values are not allowed", unreadable: true},
+		{name: "invalid YAML without paths", content: "---\ndescription: Use when: deploying\n---\nBody.\n", wantError: "mapping values are not allowed"},
+		{name: "a broken paths value", content: "---\ndescription: d\npaths: [src/**\n---\nBody.\n", wantError: "yaml", unreadable: true},
+		{name: "a broken rule naming paths", file: ".claude/rules/r.md", content: "---\ndescription: Use when: x\npaths: [src/**]\n---\nBody.\n", wantError: "mapping values", unreadable: true},
+		{name: "a list is not a mapping", content: "---\n- a\n---\nBody.\n", wantError: "cannot unmarshal"},
+		{name: "never closed", content: "---\ndescription: A skill\nBody.\n", wantError: "never closes"},
+		{name: "never closed naming paths", content: "---\npaths: [src/**]\nBody.\n", wantError: "never closes", unreadable: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			file := tt.file
+			if file == "" {
+				file = ".claude/skills/s/SKILL.md"
+			}
+			root := layout(t, map[string]string{file: tt.content})
+			cache := newFakeCache()
+
+			// Act
+			read, err := Build(context.Background(), Options{Root: root, Cache: cache})
+			require.NoError(t, err)
+			cache.items = cache.stored
+			cached, err := Build(context.Background(), Options{Root: root, Cache: cache})
+			require.NoError(t, err)
+
+			// Assert
+			for _, ix := range []*Index{read, cached} {
+				items := ix.Items()
+				require.Len(t, items, 1)
+				if tt.wantError == "" {
+					assert.Empty(t, items[0].ParseError)
+					continue
+				}
+				assert.Contains(t, items[0].ParseError, tt.wantError)
+				if !tt.unreadable {
+					assert.Nil(t, items[0].Only, "a broken block that names no paths leaves the item unrestricted")
+					continue
+				}
+				require.NotNil(t, items[0].Only, "a broken block that names paths restricts the item (fail closed)")
+				assert.Equal(t, PathGlobs{Unreadable: true}, *items[0].Only)
+			}
+		})
+	}
+}
+
+// A YAML type error still decodes the other keys, and the served item keeps
+// them, as it did before the error was recorded: the description, the name and
+// the paths gate.
+func TestBuild_FrontmatterTypeErrorKeepsTheKeysThatDecode(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "a complex key", content: "---\nname: badkey\ndescription: d\n? [a, b]\n: v\npaths: [src/**]\n---\nBody.\n"},
+		{name: "a tag that does not resolve, after the keys", content: "---\nname: badkey\ndescription: d\npaths: [src/**]\nk: !!int notanint\n---\nBody.\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := layout(t, map[string]string{".claude/skills/s/SKILL.md": tt.content})
+			cache := newFakeCache()
+
+			// Act
+			read, err := Build(context.Background(), Options{Root: root, Cache: cache})
+			require.NoError(t, err)
+			cache.items = cache.stored
+			cached, err := Build(context.Background(), Options{Root: root, Cache: cache})
+			require.NoError(t, err)
+
+			// Assert
+			for _, ix := range []*Index{read, cached} {
+				items := ix.Items()
+				require.Len(t, items, 1)
+				assert.NotEmpty(t, items[0].ParseError)
+				assert.Equal(t, "badkey", items[0].Name)
+				assert.Equal(t, "d", items[0].Description)
+				require.NotNil(t, items[0].Only, "the paths gate survives the type error")
+				assert.Equal(t, []string{"src/**"}, items[0].Only.Paths)
+			}
+		})
+	}
+}
+
+// A paths value of the wrong type decodes without an error, but where the item
+// applies cannot be known, so it fails closed as a lost gate does; a value that
+// is a string or a list of strings keeps its globs.
+func TestBuild_AMistypedPathsValueFailsClosed(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    string
+		content string
+		want    PathGlobs
+	}{
+		{name: "a number", content: "---\ndescription: d\npaths: 5\n---\nBody.\n", want: PathGlobs{Unreadable: true}},
+		{name: "a list holding a number", content: "---\ndescription: d\npaths: [src/**, 5]\n---\nBody.\n", want: PathGlobs{Unreadable: true}},
+		{name: "a mapping", content: "---\ndescription: d\npaths:\n  a: b\n---\nBody.\n", want: PathGlobs{Unreadable: true}},
+		{name: "an empty value", content: "---\ndescription: d\npaths:\n---\nBody.\n", want: PathGlobs{Unreadable: true}},
+		{name: "a rule with a number and valid globs", file: ".claude/rules/r.md", content: "---\npaths: 5\nglobs: src/**\n---\nBody.\n", want: PathGlobs{Unreadable: true}},
+		{name: "a string", content: "---\ndescription: d\npaths: src/**\n---\nBody.\n", want: PathGlobs{Paths: []string{"src/**"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			file := tt.file
+			if file == "" {
+				file = ".claude/skills/s/SKILL.md"
+			}
+			root := layout(t, map[string]string{file: tt.content})
+			cache := newFakeCache()
+
+			// Act
+			read, err := Build(context.Background(), Options{Root: root, Cache: cache})
+			require.NoError(t, err)
+			cache.items = cache.stored
+			cached, err := Build(context.Background(), Options{Root: root, Cache: cache})
+			require.NoError(t, err)
+
+			// Assert
+			for _, ix := range []*Index{read, cached} {
+				items := ix.Items()
+				require.Len(t, items, 1)
+				assert.Empty(t, items[0].ParseError, "the block decodes")
+				require.NotNil(t, items[0].Only)
+				assert.Equal(t, tt.want, *items[0].Only)
+			}
+		})
+	}
+}
+
+// A walk lists a symlinked file as git lists it, leaving the reader to decide
+// whether to follow it; a symlinked directory is neither listed nor entered.
+func TestListFiles_WalkKeepsSymlinkedFiles(t *testing.T) {
+	// Arrange
+	root := layout(t, map[string]string{"AGENTS.md": "# Root\n", "dir/a.md": "a\n"})
+	testutil.SymlinkOrSkip(t, "AGENTS.md", filepath.Join(root, "CLAUDE.md"))
+	testutil.SymlinkOrSkip(t, "missing.md", filepath.Join(root, "dangling.md"))
+	testutil.SymlinkOrSkip(t, "dir", filepath.Join(root, "linked"))
+
+	// Act
+	files := ListFiles(context.Background(), root)
+
+	// Assert
+	sort.Strings(files)
+	assert.Equal(t, []string{"AGENTS.md", "CLAUDE.md", "dangling.md", "dir/a.md"}, files)
+}
+
+func TestWalkFilesReportsTheLimit(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.md", "b.md", "c.md"} {
+		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte("x\n"), 0o600))
+	}
+	tests := []struct {
+		name   string
+		limit  int
+		files  int
+		capped bool
+	}{
+		{"below the limit", 5, 3, false},
+		{"exactly the limit", 3, 3, false},
+		{"over the limit", 2, 2, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, capped := walkFiles(root, tt.limit)
+			assert.Len(t, files, tt.files)
+			assert.Equal(t, tt.capped, capped)
+		})
+	}
+}

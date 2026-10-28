@@ -1100,6 +1100,129 @@ ai-rulez export okf --check
 | `--profile` | string |  | Profile to export (default: from config or 'default') |
 | `--role` | string |  | Export the slice of content a role selects (see 'ai-rulez roles list'); mutually exclusive with --profile |
 
+## `ai-rulez exposure`
+
+Report what a Claude Code session loads at start, and inspect its artifacts and areas
+
+```text
+ai-rulez exposure [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez exposure
+ai-rulez exposure --plugins all --context-window 1000000 --format json
+ai-rulez exposure inventory
+ai-rulez exposure inventory --format json --with-text
+ai-rulez exposure areas --areas tools/context/areas.toml --format json
+ai-rulez exposure collisions --min-score 0.2
+ai-rulez exposure leakage --format json
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--areas` | string |  | Area map file to use instead of the [exposure] table (the areas_file format) |
+| `--context-window` | int | `0` | Model context window in tokens, for the skill listing budget (default: [exposure] context_window, else 200000) |
+| `--format` | string | `text` | Output format: text, json |
+| `--harness` | string | `claude` | Harness whose load model applies; only claude |
+| `--plugins` | string |  | Marketplace plugins whose skills are listed: none, enabled or all (default: [exposure] plugins, else enabled) |
+| `--root` | string |  | Repository root to inspect (default: the project root, else the working directory) |
+
+## `ai-rulez exposure areas`
+
+Show the area map and the area of every artifact, with how it was decided
+
+```text
+ai-rulez exposure areas [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez exposure areas
+ai-rulez exposure areas --areas tools/context/areas.toml --format json
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+| `--areas` | string |  | Area map file to use instead of the [exposure] table (the areas_file format) |
+| `--plugins` | string |  | Marketplace plugins whose skills are listed: none, enabled or all (default: [exposure] plugins, else enabled) |
+| `--root` | string |  | Repository root to inspect (default: the project root, else the working directory) |
+
+## `ai-rulez exposure collisions`
+
+Rank skill and agent pairs of different areas whose listings overlap
+
+```text
+ai-rulez exposure collisions [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez exposure collisions
+ai-rulez exposure collisions --min-score 0.2 --limit 50
+ai-rulez exposure collisions --areas tools/context/areas.toml --plugins none --format json
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+| `--limit` | int | `20` | Pairs printed, highest score first; 0 prints every pair |
+| `--min-score` | number | `0.1` | Lowest word overlap (Jaccard index, 0 to 1) reported (default: [exposure] collision_min_score, else 0.1) |
+| `--areas` | string |  | Area map file to use instead of the [exposure] table (the areas_file format) |
+| `--plugins` | string |  | Marketplace plugins whose skills are listed: none, enabled or all (default: [exposure] plugins, else enabled) |
+| `--root` | string |  | Repository root to inspect (default: the project root, else the working directory) |
+
+## `ai-rulez exposure inventory`
+
+List every artifact a session can see, with its phase, visibility and parse status
+
+```text
+ai-rulez exposure inventory [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez exposure inventory
+ai-rulez exposure inventory --plugins all
+ai-rulez exposure inventory --format json --with-text
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+| `--with-text` | bool |  | Include each artifact's text in the JSON output |
+| `--areas` | string |  | Area map file to use instead of the [exposure] table (the areas_file format) |
+| `--plugins` | string |  | Marketplace plugins whose skills are listed: none, enabled or all (default: [exposure] plugins, else enabled) |
+| `--root` | string |  | Repository root to inspect (default: the project root, else the working directory) |
+
+## `ai-rulez exposure leakage`
+
+Report area terms in the text a session sees at its start (AR9W0, AR9W1)
+
+```text
+ai-rulez exposure leakage [flags]
+```
+
+Examples:
+
+```bash
+ai-rulez exposure leakage
+ai-rulez exposure leakage --root services/billing
+ai-rulez exposure leakage --areas tools/context/areas.toml --format json
+```
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--format` | string | `text` | Output format: text, json |
+| `--areas` | string |  | Area map file to use instead of the [exposure] table (the areas_file format) |
+| `--plugins` | string |  | Marketplace plugins whose skills are listed: none, enabled or all (default: [exposure] plugins, else enabled) |
+| `--root` | string |  | Repository root to inspect (default: the project root, else the working directory) |
+
 ## `ai-rulez generate`
 
 Generate AI assistant rule files from configuration
@@ -3931,7 +4054,7 @@ ai-rulez validate --outputs
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--allow-egress` | string list |  | With --external, allow the named [[lint.external]] scanners that declare egress = true to run (repeatable) |
-| `--analyzer` | string list |  | Run only these analyzers (repeatable or comma-separated; replaces [lint] analyzers): budgets, config, convert, delivery, descriptions, duplicates, evals, hooks, llmstxt, lock, mcp, metadata, okf, plugin, references, roles, search, security, traps, verifiers |
+| `--analyzer` | string list |  | Run only these analyzers (repeatable or comma-separated; replaces [lint] analyzers): budgets, config, convert, delivery, descriptions, duplicates, evals, exposure, hooks, llmstxt, lock, mcp, metadata, okf, plugin, references, roles, search, security, traps, verifiers |
 | `--approvals-base` | string |  | Report approvals added since this git revision for content that also changed since it (AR716) |
 | `--baseline` | string |  | Accept the findings recorded in this baseline file (default: <config dir>/lint-baseline.json when it exists); only new findings count toward the exit code |
 | `--baseline-reason` | string |  | With --update-baseline, the reason stored on new entries (required for security findings) |

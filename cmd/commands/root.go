@@ -19,7 +19,7 @@ const envPrefix = "AI_RULEZ"
 var (
 	cfgFile  string
 	gitToken string
-	Version  = "5.8.0"
+	Version  = "5.9.1"
 )
 
 var RootCmd = &cobra.Command{
@@ -162,6 +162,7 @@ func init() {
 	RootCmd.AddCommand(SBOMCmd)
 	RootCmd.AddCommand(TokensCmd)
 	RootCmd.AddCommand(CostCmd)
+	RootCmd.AddCommand(newExposureCmd())
 	RootCmd.AddCommand(EvalCmd)
 	RootCmd.AddCommand(ImproveCmd)
 	RootCmd.AddCommand(LocalCmd)

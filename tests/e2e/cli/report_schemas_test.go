@@ -105,13 +105,21 @@ func TestEveryJSONContractValidatesAgainstItsSchema(t *testing.T) {
 	snapshot := env.run(root, "catalog", "--format", "json", "--schema-version", "2")
 	require.Equal(t, 0, snapshot.ExitCode, snapshot.Stderr)
 	require.NoError(t, os.WriteFile(catalog, []byte(snapshot.Stdout), 0o600))
-	writeTree(t, root, map[string]string{"bundle/index.md": "---\nokf_version: \"0.2\"\n---\n\n# Concepts\n"})
+	writeTree(t, root, map[string]string{
+		"bundle/index.md": "---\nokf_version: \"0.2\"\n---\n\n# Concepts\n",
+		"areas.toml":      "[[area]]\nname = \"db\"\npaths = [\"db\"]\n",
+	})
 	runAll(root, []reportCase{
 		{"validate", []string{"validate"}, 0},
 		{"scan", []string{"scan"}, 0},
 		{"doctor", []string{"doctor"}, 0},
 		{"tokens", []string{"tokens"}, 0},
 		{"cost", []string{"cost"}, 0},
+		{"exposure", []string{"exposure"}, 0},
+		{"exposure inventory", []string{"exposure", "inventory", "--with-text"}, 0},
+		{"exposure areas", []string{"exposure", "areas", "--areas", filepath.Join(root, "areas.toml")}, 0},
+		{"exposure collisions", []string{"exposure", "collisions", "--areas", filepath.Join(root, "areas.toml"), "--min-score", "0"}, 0},
+		{"exposure leakage", []string{"exposure", "leakage", "--areas", filepath.Join(root, "areas.toml")}, 0},
 		{"catalog", []string{"catalog"}, 0},
 		{"catalog diff", []string{"catalog", "diff", catalog, catalog}, 0},
 		{"lock --check", []string{"lock", "--check"}, 0},
@@ -189,6 +197,19 @@ func TestReportSchemasRejectAWrongDocument(t *testing.T) {
 		"sbom-report.schema.json":    `{"schema_version":1,"status":"bogus","type":"cyclonedx","findings":[],"differences":[]}`,
 		"verifiers-test.schema.json": `{"schema_version":1,"ok":true,"passed":0,"total":0,"results":null,"untested":[],"problems":[]}`,
 		schema.ErrorDocumentSchema:   `{"schema_version":1,"status":"error","error":"x","exit_code":0}`,
+		"exposure-inventory.v1.schema.json": `{"schema_version":1,"harness":"claude","root":"/r","settings":{"skill_overrides":{},"claude_md_excludes":[],"enabled_plugins":[]},` +
+			`"plugins":{"mode":"enabled","marketplace":"","available":[],"enabled":[],"loaded":[]},"problems":[],"artifacts":[{"kind":"skill","source":"file","name":"s",` +
+			`"qualified_name":"s","path":"p","scope":".","visibility":"always","phase":"later","paths":[],"listing_chars":0,"truncated":false,"text_bytes":0,` +
+			`"text_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","tokens":0,"line_offset":0}]}`,
+		"exposure-collisions.v1.schema.json": `{"schema_version":1,"root":"/r","plugins":"none","min_score":0.1,"artifacts_compared":2,"total":1,` +
+			`"collisions":[{"score":0.5,"shared":[],"first":"a","first_kind":"skill","first_name":"a","first_area":"x","second":"b","second_kind":"rule","second_name":"b","second_area":"y"}]}`,
+		"exposure-report.v1.schema.json": `{"schema_version":1,"harness":"claude","root":"/r","plugins":{"mode":"none","marketplace":"","available":[],"enabled":[],"loaded":[]},` +
+			`"start_budget":0,"listing":{"context_window":200000,"skills":0,"chars":0,"budget_chars":8000,"over_budget_chars":0,"descriptions_capped":0},` +
+			`"start_tokens":0,"tokens_by_phase":{"later":1},"start_tokens_by_kind":{},"counts_by_phase_and_kind":{"start":{},"on_demand":{},"manual":{}},"items":[]}`,
+		"exposure-areas.v1.schema.json": `{"schema_version":1,"root":"/r","areas_file":"","plugins":"enabled","areas":[],"skill_areas":{},"counts":{},` +
+			`"artifacts":[{"kind":"skill","source":"file","name":"s","qualified_name":"s","path":"p","scope":".","area_scope":".","phase":"start","area":"a","area_source":"guess"}]}`,
+		"exposure-leakage.v1.schema.json": `{"schema_version":1,"root":"/r","plugins":"none","areas_file":"","artifacts_checked":1,"unchecked":[],"stale_acceptances":[],"findings":[{"severity":"fatal","code":"AR9W0","area":"a",` +
+			`"term":"t","kind":"skill","name":"s","path":"p","scope":".","line":1,"excerpt":"e","reason":""}]}`,
 	} {
 		schemaBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "schema", file))
 		require.NoError(t, err)

@@ -19,16 +19,30 @@ const (
 	maxWalk = 200000
 )
 
-// listFiles lists the files below root that are not ignored: git's own listing
+// ListFiles lists the files below root that are not ignored: git's own listing
 // (tracked files and untracked files .gitignore does not exclude) in a
 // repository, else a walk that skips .git and node_modules. Paths are slash
-// separated and relative to root; a symlink may be among them, and the reader
+// separated and relative to root. A symlink may be among them in both modes
+// (the walk keeps every symlink that does not resolve to a directory, dangling
+// ones included), and the reader decides whether to follow it: ReadRegular
 // refuses it.
-func listFiles(ctx context.Context, root string) []string {
+func ListFiles(ctx context.Context, root string) []string {
+	files, _ := ListFilesCapped(ctx, root)
+	return files
+}
+
+// ListFilesCapped is ListFiles that also reports whether the walk outside a git
+// repository stopped at its limit, so a caller that counts files can say the
+// listing is incomplete.
+func ListFilesCapped(ctx context.Context, root string) (files []string, capped bool) {
 	if files, ok, err := (gitutil.Git{}).ListFilesContext(ctx, root); ok && err == nil {
-		return files
+		return files, false
 	}
-	var files []string
+	return walkFiles(root, maxWalk)
+}
+
+// walkFiles lists up to limit files below root, skipping .git and node_modules.
+func walkFiles(root string, limit int) (files []string, capped bool) {
 	//nolint:errcheck // an unreadable entry is left out
 	_ = filepath.WalkDir(root, func(p string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -40,15 +54,29 @@ func listFiles(ctx context.Context, root string) []string {
 			}
 			return nil
 		}
-		if rel, relErr := filepath.Rel(root, p); relErr == nil && entry.Type().IsRegular() {
-			files = append(files, filepath.ToSlash(rel))
-		}
-		if len(files) >= maxWalk {
+		if len(files) >= limit {
+			capped = true
 			return fs.SkipAll
+		}
+		if rel, relErr := filepath.Rel(root, p); relErr == nil && listable(p, entry) {
+			files = append(files, filepath.ToSlash(rel))
 		}
 		return nil
 	})
-	return files
+	return files, capped
+}
+
+// listable reports whether a walked entry that is not a directory is listed:
+// a regular file, or a symlink that does not resolve to a directory.
+func listable(p string, entry fs.DirEntry) bool {
+	switch {
+	case entry.Type().IsRegular():
+		return true
+	case entry.Type()&fs.ModeSymlink == 0:
+		return false
+	}
+	info, err := os.Stat(p)
+	return err != nil || !info.IsDir()
 }
 
 // ReadRegular reads a regular file below root of at most limit bytes. ok is

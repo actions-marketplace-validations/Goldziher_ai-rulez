@@ -265,6 +265,11 @@ rewrites them), and the test fails when they are stale.
 | `edit context` | partial field edits and stdin input; update_context is the whole-item replacement for a tool client |
 | `convert`, `migrate *` | one-shot conversions that read untrusted tool files and rewrite the tree; gated by --write or a preview |
 | `eval *`, `improve *` | run models and harness subprocesses and spend money |
+| `exposure` | offline report of what a Claude Code session loads at its start and on demand, run by a maintainer; no tool exposes it |
+| `exposure areas` | offline view of the area map of the [exposure] settings; no tool exposes it |
+| `exposure collisions` | offline report of skill and agent listings that collide; no tool exposes it |
+| `exposure inventory` | offline listing of the session inventory; no tool exposes it |
+| `exposure leakage` | offline report of area terms in start-of-session text; validate runs the same rules |
 | `guard` | a hook entry point the harness calls on tool use |
 | `skill update` | re-pins installed skills over the network and rewrites the lock |
 | `list` | prints where skills and commands land per harness; generate_outputs dry_run returns the same plan |
@@ -788,6 +793,17 @@ result carries its `paths` or `globs`, so you can see what narrows it.
 `backend/services/**/kafka*.py` is kept for `backend/services` and dropped for `products/web`, and `**/*.py` is kept for any
 directory. A path that exists is a directory if the filesystem says so; one that does not exist is a file when its last
 element has an extension. A restriction none of whose globs can be read does not hide the item.
+
+A rule whose frontmatter names `paths:` but does not parse as YAML (an unquoted `:` in a value, an unclosed quote or
+bracket, a tab indent, a block that never closes) has lost its globs. So has a rule or skill whose `paths` value
+parses but is neither a string nor a list of strings (`paths: 5`, a list holding a number, an empty `paths:`). Where
+it applies cannot be known, so it fails closed: a `path` query never returns it, and a `scope` query lists it with
+`"paths_unreadable": true` instead of as an item that applies everywhere. A skill whose frontmatter does not parse is
+not served at all. `ai-rulez validate` reports the block as `AR306` and the lost gate as `AR9W4`.
+
+A known limitation: only `paths:` fails closed. A Cursor rule (`.cursor/rules/*.mdc`) whose broken block names
+`globs:` (and not `alwaysApply: true`) is served as a rule that applies everywhere, as if it had no globs; fix the
+block (`AR306` reports it) to restore the restriction.
 
 `load_context` reads one, by `scope` and `name` or by `uri`, with an optional `budget_bytes`:
 

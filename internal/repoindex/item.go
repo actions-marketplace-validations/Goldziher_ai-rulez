@@ -7,11 +7,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/Goldziher/ai-rulez/v5/internal/config"
 	"github.com/Goldziher/ai-rulez/v5/internal/frontmatter"
 )
+
+// keyPaths is the frontmatter key of the Claude Code path restriction.
+const keyPaths = "paths"
 
 // Hash is the content hash an item carries: "sha256:" and the hex digest.
 func Hash(content []byte) string {
@@ -22,13 +23,17 @@ func Hash(content []byte) string {
 // newItem builds the item a candidate and its content describe.
 func newItem(c *candidate, content []byte) Item {
 	block := frontmatter.Split(content)
-	var front map[string]any
-	if block.Closed {
-		_ = yaml.Unmarshal([]byte(block.Raw), &front) //nolint:errcheck // malformed frontmatter only costs the description
-	}
+	front, err := frontmatter.Decode(block)
 	it := Item{
 		Kind: c.kind, Scope: c.scope, Source: c.source, Path: c.unit,
 		Hash: Hash(content),
+	}
+	if err != nil {
+		// The item keeps what the YAML decode read all the same (every other key
+		// on a type error, nothing on a syntax error), as the served index always
+		// did; the error travels with it so a reader can tell a lost gate from an
+		// absent one.
+		it.ParseError = err.Error()
 	}
 	switch c.kind {
 	case KindSkill:
@@ -51,14 +56,32 @@ func newItem(c *candidate, content []byte) Item {
 		it.Only = ruleGlobs(front)
 	case KindSkill:
 		it.Only = skillGlobs(front)
+	default:
+		return it
+	}
+	if (err != nil && it.Only == nil && frontmatter.NamesKey(block.Raw, keyPaths)) || pathsMistyped(front) {
+		it.Only = &PathGlobs{Unreadable: true}
 	}
 	return it
+}
+
+// pathsMistyped reports a `paths` value that is neither a string nor a list of
+// strings (`paths: 5`, a list holding a number, an empty `paths:`). It decodes
+// without an error, but where the item applies cannot be known, as the
+// exposure inventory reads it (phase unknown), so the gate fails closed.
+func pathsMistyped(front map[string]any) bool {
+	v, ok := front[keyPaths]
+	if !ok {
+		return false
+	}
+	_, typed := frontmatter.StringList(v)
+	return !typed
 }
 
 // ruleGlobs reads the path restriction of a rule from its frontmatter: `paths`
 // (Claude Code) and `globs` (Cursor, ignored for a rule that is always applied).
 func ruleGlobs(front map[string]any) *PathGlobs {
-	g := &PathGlobs{Paths: globList(front["paths"])}
+	g := &PathGlobs{Paths: globList(front[keyPaths])}
 	if always, _ := front["alwaysApply"].(bool); !always { //nolint:errcheck // absent or not a bool means not always applied
 		g.Globs = globList(front["globs"])
 	}
@@ -72,7 +95,7 @@ func ruleGlobs(front map[string]any) *PathGlobs {
 // in SKILL.md and hides the skill until a matching file is read. `globs` is a
 // Cursor rule field; a skill has no Cursor form, so it is not read.
 func skillGlobs(front map[string]any) *PathGlobs {
-	paths := globList(front["paths"])
+	paths := globList(front[keyPaths])
 	if len(paths) == 0 {
 		return nil
 	}
