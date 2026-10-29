@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -58,7 +58,7 @@ jobs:
           - { target: FuzzFrontmatterSplittersAgree, pkg: ./internal/fmdiff }
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         uses: actions/setup-go@v7

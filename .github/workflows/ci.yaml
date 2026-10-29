@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -74,7 +74,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
@@ -144,7 +144,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -164,7 +164,7 @@ jobs:
       fail-fast: false
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         id: setup-go
@@ -256,7 +256,7 @@ jobs:
       fail-fast: false
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -300,7 +300,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -334,7 +334,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -353,7 +353,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           # The regression check builds the base revision next to HEAD, so it needs the history.
           fetch-depth: 0
@@ -431,7 +431,7 @@ jobs:
       fail-fast: false
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         id: setup-go
@@ -499,7 +499,7 @@ jobs:
     needs: [lint, test, e2e-test, comprehensive-test]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         uses: actions/setup-go@v7
