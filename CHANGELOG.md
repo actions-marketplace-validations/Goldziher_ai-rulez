@@ -4,6 +4,71 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [5.9.5] - 2026-10-30
+
+### Fixed
+
+- **`exposure` counts gitignored native context files.** A generated `CLAUDE.md`, `AGENTS.md` and
+  `.claude/` are normally gitignored, and the git listing the inventory starts from left them out, so a
+  real repository could report zero start tokens and pass its budget while Claude Code still loaded the
+  instructions. The inventory now adds those native artifacts whether or not git ignores them, and this
+  covers `exposure inventory`, leakage and the start budget alike
+  ([#522](https://github.com/Goldziher/ai-rulez/issues/522)).
+- **The include cache is keyed by the locked commit, so checkouts on different pins no longer break each
+  other.** Every checkout on a machine shared one `<name>-<hash>` directory per include, so the checkout that
+  ran last decided its contents: `lock --check` failed with `fetched commit <A> but the lock records <B>`
+  although its lock was correct, and `mcp` could not read the project's `[mcp]` settings and registered every
+  tool instead of the configured allow-list. A lock-pinned include is now cached under its pinned commit, so a
+  load that needs another commit fetches it into a directory of its own; a cache written under the ref alone is
+  still read while it holds exactly the pinned commit. `ai-rulez mcp` now stops when the project cannot be read
+  instead of silently serving every tool
+  ([#524](https://github.com/Goldziher/ai-rulez/issues/524)).
+
+### Added
+
+- **The poly hook catalog offers an npm execution path.** Every hook now declares a second
+  `[[hooks.paths]]` entry (`channel = "npm"`, `npx -y ai-rulez@latest`) next to `system`, so a repository
+  that runs ai-rulez only through npm can install the hooks. `[hook_preferences] channels = ["system",
+  "npm"]` keeps a reviewed binary first and falls back to the latest release
+  ([#526](https://github.com/Goldziher/ai-rulez/issues/526)).
+
+## [5.9.4] - 2026-10-30
+
+### Fixed
+
+- **A root-level gitignore entry is anchored, so it no longer hides a tracked nested file.** `.mcp.json`,
+  `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and `opencode.json` were written without a leading slash, which
+  matches at every depth: a committed `plugin/.mcp.json` or a nested `AGENTS.md` another tool reads was
+  ignored by git after `generate --gitignore`. They are now written `/.mcp.json`, `/AGENTS.md`, and so on
+  ([#515](https://github.com/Goldziher/ai-rulez/issues/515)).
+- **The committed `.gitignore` block no longer depends on the developer's machine.** Deciding what to add
+  asked `git check-ignore`, which honors `core.excludesFile`, the XDG global ignore file and
+  `.git/info/exclude`; an entry covered by one developer's global ignore was left out of the committed
+  block, and two developers generated different blocks. The check now runs against a throwaway mirror of
+  the repository's own ignore files with the global excludes pointed at the null device
+  ([#518](https://github.com/Goldziher/ai-rulez/issues/518)).
+- **Gitignore matching follows git's semantics.** A hand-written `**/...` line now covers the managed entry
+  it matches (both write and `generate --check` use one rule), a line is never dropped because it is a
+  substring of another, `**` crosses directories, and the managed block is written sorted even when a later
+  root fails, so a partial run leaves the same order the final rewrite produces
+  ([#519](https://github.com/Goldziher/ai-rulez/issues/519)).
+- **A nested plugin config contributes to the one toplevel block.** Its machine-local inputs
+  (`plugin/.ai-rulez/config.local.*`, `plugin/.ai-rulez/local/`) were ignored in neither place: the
+  recursive sink skipped plugin-mode roots and `LocalDoc` wrote a `plugin/.gitignore` of its own. The block
+  writer now moves to the work-tree root and prefixes the patterns, so the overlay cannot be committed and
+  no nested `.gitignore` is created ([#517](https://github.com/Goldziher/ai-rulez/issues/517)).
+- **`generate --recursive` renders a marketplace member as a member.** A plugin-authoring root that an
+  enclosing config lists under `[marketplace] members` was rendered standalone, which wrote
+  `.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`, `.agents/plugins/marketplace.json`
+  and `.cursor-plugin/marketplace.json` into the committed bundle and churned the `Source-Hash` of every
+  file in it. The member root now renders through the member path, byte-identical to root
+  `generate --plugin` ([#516](https://github.com/Goldziher/ai-rulez/issues/516)).
+- **`ai-rulez update` refreshes the served-skill digests it invalidates.** Moving an include's version pin
+  re-resolved the source but kept the served digests of the old release, so `lock --check` failed
+  immediately after a successful update and the pre-commit hook refused the commit. The update now
+  recomputes every served skill of each serve view for the release it moves to
+  ([#521](https://github.com/Goldziher/ai-rulez/issues/521)).
+
 ## [5.9.3] - 2026-10-30
 
 ### Added
