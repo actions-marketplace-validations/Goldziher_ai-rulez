@@ -58,7 +58,7 @@ jobs:
         with:
           version: "12.14.0"
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           ref: >-
@@ -281,7 +281,7 @@ jobs:
             build-essential git curl ca-certificates binutils python3
 
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           ref: >-
@@ -562,7 +562,7 @@ jobs:
         with:
           version: "12.14.0"
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           ref: >-
@@ -618,7 +618,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           ref: >-
@@ -668,7 +668,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: >-
             ${{
@@ -734,7 +734,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout release source
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.meta.outputs.tag }}
           persist-credentials: false

@@ -45,7 +45,7 @@ jobs:
         # system bins, which differ between the two images.
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -79,7 +79,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Check tests/lib/xberg-bats against the pinned xberg-io/actions commit
         run: scripts/bats/sync-xberg-bats.sh --check
