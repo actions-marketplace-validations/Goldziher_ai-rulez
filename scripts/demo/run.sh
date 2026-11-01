@@ -24,11 +24,11 @@ shift || true
 case "$cmd" in
 record)
   command -v vhs >/dev/null || {
-    echo "vhs is required: brew install vhs" >&2
+    echo "vhs is required: mise install --locked vhs" >&2
     exit 1
   }
   command -v ai-rulez >/dev/null || {
-    echo "ai-rulez must be on PATH (task build, then put bin/ on PATH)" >&2
+    echo "ai-rulez must be on PATH (mise run build, then put bin/ on PATH)" >&2
     exit 1
   }
   for name in $(names "$@"); do
@@ -42,7 +42,7 @@ record)
   ;;
 check)
   command -v vhs >/dev/null || {
-    echo "vhs is required: brew install vhs" >&2
+    echo "vhs is required: mise install --locked vhs" >&2
     exit 1
   }
   status=0

@@ -14,7 +14,13 @@ on:
       - "cmd/**"
       - "go.mod"
       - "go.sum"
-      - "Taskfile.yml"
+      - "mise.toml"
+      - "mise.lock"
+      - "mise-tasks/**"
+      - "mise.ci.toml"
+      - "toolchains.toml"
+      - "scripts/mise/**"
+      - ".github/actions/go-toolchain/**"
       - ".github/workflows/bats.yaml"
   pull_request:
     branches: [main]
@@ -28,11 +34,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # The version scripts/bats/run.sh is used with locally, passed explicitly so the workflow does not
-  # silently follow a changed action default.
-  BATS_VERSION: "1.14.0"
-
 jobs:
   bats:
     name: Bats on ${{ matrix.os }}
@@ -43,14 +44,12 @@ jobs:
       matrix:
         # Both: the pre-commit script maps uname per platform and the suites shadow the host's
         # system bins, which differ between the two images.
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-26]
     steps:
       - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: "1.27"
+        uses: ./.github/actions/go-toolchain
 
       # The suites that check emitted scripts (Cline hooks, the Husky hook, the improve template,
       # the rule docs) render them through a binary built from this commit.
@@ -59,10 +58,10 @@ jobs:
           go build -o "$RUNNER_TEMP/ai-rulez" ./cmd/ai-rulez
           echo "AI_RULEZ_BATS_BIN=$RUNNER_TEMP/ai-rulez" >>"$GITHUB_ENV"
 
-      - name: Install Bats
-        uses: xberg-io/actions/install-bats@v1
+      - name: Install locked Bats
+        uses: xberg-io/actions/setup-mise@v1
         with:
-          version: ${{ env.BATS_VERSION }}
+          tools: bats
 
       - name: Run the shell script suites
         uses: xberg-io/actions/run-bats@v1
@@ -81,20 +80,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check tests/lib/xberg-bats against the pinned xberg-io/actions commit
-        run: scripts/bats/sync-xberg-bats.sh --check
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
+      # poly has no engine for .bats, so the suites are linted directly, with the shfmt and
+      # shellcheck mise.toml pins.
+      - name: Install shfmt and shellcheck
+        uses: xberg-io/actions/setup-mise@v1
         with:
-          go-version: "1.27"
+          tools: shfmt shellcheck
 
-      # poly has no engine for .bats, so the suites are linted directly. shfmt is not on the
-      # runner image; pinned to the version used locally.
-      - name: Install shfmt
-        run: |
-          go install mvdan.cc/sh/v3/cmd/shfmt@v3.14.1
-          echo "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
+      - name: Check tests/lib/xberg-bats against the pinned xberg-io/actions commit
+        run: mise run test:lib:check
 
       - name: Lint the Bats suites
-        run: scripts/bats/lint.sh
+        run: mise run lint:bats

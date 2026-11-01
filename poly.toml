@@ -8,7 +8,9 @@ trim_trailing_whitespace = true
 
 [discovery]
 exclude = [
+  "/adrs/**",
   "**/*.lock",
+  ".mise/locks/**/aube-lock.yaml",
   "**/*.svg",
   "**/Cargo.lock",
   "**/go.sum",
@@ -56,7 +58,9 @@ stages = ["pre-commit"]
 
 [hooks.builtin]
 lint = { exclude = [
+  "/adrs/**",
   "**/*.lock",
+  ".mise/locks/**/aube-lock.yaml",
   "**/*.svg",
   "**/Cargo.lock",
   "**/go.sum",
@@ -74,7 +78,9 @@ lint = { exclude = [
   "vendor/**",
 ] }
 fmt = { exclude = [
+  "/adrs/**",
   "**/*.lock",
+  ".mise/locks/**/aube-lock.yaml",
   "**/*.svg",
   "**/Cargo.lock",
   "**/go.sum",
@@ -94,6 +100,7 @@ fmt = { exclude = [
 commit = { stages = ["commit-msg"] }
 file_safety = { exclude = [
   "**/*.lock",
+  ".mise/locks/**/aube-lock.yaml",
   "**/*.svg",
   "**/Cargo.lock",
   "**/go.sum",
@@ -131,5 +138,5 @@ enabled = true
 [[hooks.sources]]
 id = "ai-rulez"
 git = "https://github.com/Goldziher/ai-rulez.git"
-revision = "a2b5c73f34e133dd0a87f40576986b327d21913a"
+revision = "v5"
 hooks = ["ai-rulez-validate"]

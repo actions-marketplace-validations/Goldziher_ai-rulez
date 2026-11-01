@@ -34,18 +34,18 @@ Use this skill when:
 
 ```bash
 # npm (no install)
-pnpm dlx ai-rulez@5.7.0
+npx -y ai-rulez@latest
 
 # Python (no install)
-uvx ai-rulez==5.7.0
+uvx ai-rulez
 
-# Source builds (Go + Task; setup fetches and verifies the pinned native library)
+# Source builds (mise; the build task fetches and verifies the pinned native library)
 # Checkout the source revision pinned in this repository's CI, then:
-task build
+mise run build
 ```
 
 Package commands use the published release. Source builds also need the pinned
-Liter-LLM native library: `task build` provisions it through
+Liter-LLM native library: `mise run build` provisions it through
 `scripts/setup-liter-llm.sh`; a bare `go install` does not do that setup.
 Version 5.4.0 includes the governance and plugin validation fixes described below.
 For a reviewed source build, use the exact revision recorded in the CI workflow.
@@ -145,8 +145,8 @@ source = "https://github.com/kreuzberg-dev/kreuzberg"
 
 [[mcp_servers]]
 name = "ai-rulez"
-command = "pnpm"
-args = ["dlx", "ai-rulez@5.7.0", "mcp"]
+command = "npx"
+args = ["-y", "ai-rulez@latest", "mcp"]
 
 [[scopes]]
 path = "packages/web"

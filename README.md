@@ -237,7 +237,7 @@ ai-rulez validate --strict
 
 The module path needs `/v5`; without it `@latest` resolves to an old build.
 This local build needs cgo, a C toolchain and the Go module cache at runtime.
-For a statically linked build, use `task build` from a clone; see [source installation](docs/installation.md).
+For a statically linked build, use `mise run build` from a clone; see [source installation](docs/installation.md).
 
 </details>
 
@@ -411,7 +411,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/ai-rulez
-    rev: v5.9.8
+    rev: v5.10.0
     hooks:
       - id: ai-rulez-recursive   # generate: write outputs for every nested .ai-rulez/ root
       - id: ai-rulez-validate    # validate --recursive: content, security and link checks
@@ -442,7 +442,7 @@ repository needs:
 [[hooks.sources]]
 id = "ai-rulez"
 git = "https://github.com/Goldziher/ai-rulez.git"
-revision = "v5.9.8"
+revision = "v5.10.0"
 hooks = ["ai-rulez-recursive", "ai-rulez-plugin-verify"]
 ```
 
