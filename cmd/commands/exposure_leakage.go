@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -27,15 +28,24 @@ func newExposureLeakageCmd(f *exposureFlags) *cobra.Command {
 the root CLAUDE.md, unconditional root rules, the skill and agent listing lines, the MCP server names and
 the enabled plugin names (AR9W0, a violation), outside repository path literals, and each listed skill or
 agent that names only ambiguous words (AR9W1, a warning). An artifact whose phase is unknown counts as
-start of session. A start-of-session artifact whose file could not be read (over the read limit, a
-symlink to outside the root) is listed as unchecked: it is not a finding, and no leak in it can be found.
+start of session. The text of each file such a CLAUDE.md or rule imports with @path is scanned too, and a leak
+in it is reported against the imported file (imported_by names the importer). A start-of-session artifact
+or imported file that could not be read (over the read limit, a symlink to outside the root, an absolute,
+home or outside-the-root import) is listed as unchecked: it is not a finding, and no leak in it can be found.
+
+--harness codex (default: [exposure] harness, else claude) checks Codex's start-of-session text instead: the
+root AGENTS.md (or AGENTS.override.md) and the files it imports, the .agents/skills listing lines and the
+MCP server names of .codex/config.toml. Codex has no marketplace plugins, so --plugins other than none is
+an error under it.
 
 --root inspects that directory as a session started there sees it, with the configuration and area map
 of the project; the paths are relative to --root.
 
 The findings are those of ` + "`ai-rulez validate`" + `, accepted by the same [[lint.accept]] entries: an accepted
 finding is listed with the entry's reason, and an entry for AR9W0 or AR9W1 that accepts nothing is a stale
-acceptance (AR9I0). A [[lint.accept]] match is a substring of the message
+acceptance (AR9I0). The areas file may also record known occurrences in [[accept]] tables (term, path, reason,
+optional area); the path is read as a [[lint.accept]] path is and relative to the project root, also under
+--root. A [[lint.accept]] match is a substring of the message
 ` + "`<kind> \"<name>\" at session start names term \"<term>\" of area \"<area>\"`" + `.
 
 --format json prints schema/exposure-leakage.v1.schema.json. Exit codes: 0 no violation and no stale
@@ -43,6 +53,7 @@ acceptance, 1 the command could not run (bad flags, an invalid configuration or 
 2 a violation or a stale acceptance.`,
 		Example: `  ai-rulez exposure leakage
   ai-rulez exposure leakage --root services/billing
+  ai-rulez exposure leakage --harness codex
   ai-rulez exposure leakage --areas tools/context/areas.toml --format json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -64,8 +75,32 @@ acceptance, 1 the command could not run (bad flags, an invalid configuration or 
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&f.harness, "harness", "", "Harness whose load model applies: claude or codex (default: [exposure] harness, else claude)")
 	addJSONFormat(cmd.Flags(), &f.asJSON, "")
 	return cmd
+}
+
+// checkLeakageFlags rejects an unknown --plugins and an unknown --harness.
+func checkLeakageFlags(f *exposureFlags) error {
+	if f.plugins != "" && !exposure.PluginMode(f.plugins).Valid() {
+		return oops.Errorf("unknown --plugins %q (use none, enabled or all)", f.plugins)
+	}
+	if f.harness != "" && !slices.Contains(exposure.Harnesses(), f.harness) {
+		return oops.Errorf("unknown --harness %q (%s)", f.harness, "claude or codex")
+	}
+	return nil
+}
+
+// leakagePlugins is the plugin mode the leakage run uses: --plugins as given, except under codex, which has no
+// marketplace plugins: none, and an error for any other --plugins.
+func leakagePlugins(src *exposureLintSource, plugins string) (exposure.PluginMode, error) {
+	if src.effectiveHarness() != config.ExposureHarnessCodex {
+		return src.plugins, nil
+	}
+	if plugins != "" && plugins != string(exposure.PluginsNone) {
+		return "", oops.Errorf("--plugins %s has no effect under the codex harness, which has no marketplace plugins; drop it or use --plugins none", plugins)
+	}
+	return exposure.PluginsNone, nil
 }
 
 // runExposureLeakage runs the exposure rules of `validate` over the inventory
@@ -73,8 +108,8 @@ acceptance, 1 the command could not run (bad flags, an invalid configuration or 
 // of the flags, and returns their leakage view. The paths are relative to
 // --root.
 func runExposureLeakage(ctx context.Context, f *exposureFlags) (*exposure.LeakageReport, error) {
-	if f.plugins != "" && !exposure.PluginMode(f.plugins).Valid() {
-		return nil, oops.Errorf("unknown --plugins %q (use none, enabled or all)", f.plugins)
+	if err := checkLeakageFlags(f); err != nil {
+		return nil, err
 	}
 	cfg, root, err := exposureProject(ctx, f.root)
 	if err != nil {
@@ -108,7 +143,10 @@ func runExposureLeakage(ctx context.Context, f *exposureFlags) (*exposure.Leakag
 	}
 	src := exposureLintSource{
 		ctx: ctx, cfg: cfg, dir: root, areas: m, areasFile: areasFilePath(root, file),
-		plugins: exposure.PluginMode(f.plugins), cache: &exposureCache{},
+		plugins: exposure.PluginMode(f.plugins), harness: f.harness, cache: &exposureCache{},
+	}
+	if src.plugins, err = leakagePlugins(&src, f.plugins); err != nil {
+		return nil, err
 	}
 	rep, err := lint.RunWith(cfg, tree, lint.Options{Analyzers: []string{lint.AnalyzerExposure}, Cwd: root},
 		lint.WithContext(ctx), lint.WithExposure(src))
@@ -149,7 +187,7 @@ func leakageReport(res *lint.LeakageResult) *exposure.LeakageReport {
 		}
 		out.Findings = append(out.Findings, exposure.Leak{
 			Severity: sev, Code: l.Code, Area: l.Area, Term: l.Term, Kind: exposure.Kind(l.Kind), Name: l.Name,
-			Path: l.Path, Scope: l.Scope, Line: l.Line, Excerpt: l.Excerpt, Reason: l.Reason,
+			Path: l.Path, Scope: l.Scope, Line: l.Line, Excerpt: l.Excerpt, Reason: l.Reason, ImportedBy: l.ImportedBy,
 		})
 	}
 	return out

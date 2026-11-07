@@ -50,7 +50,7 @@ var (
 	// ruleKeys are the keys rules and context files understand, including the
 	// Cursor and Windsurf spellings ai-rulez maps.
 	ruleKeys = []string{keyGlobs, keyPaths, "glob", "alwaysApply", keyFallback, "trigger", "activation", keyDescription, "name"}
-	// checkKeys are the frontmatter keys of a code-review check (docs/checks.md).
+	// checkKeys are the frontmatter keys of a code-review check (https://goldziher.github.io/ai-rulez/checks/).
 	checkKeys = []string{keyDescription, "severity", "tools", keyTargets}
 	// ownKeys are the ai-rulez keys valid on every kind.
 	ownKeys = []string{
@@ -75,7 +75,12 @@ func (r *runner) knownKeys(kind string) map[string]bool {
 	case kindSkill, kindCommand:
 		add(claudeSkillKeys)
 	case kindAgent:
-		add(claudeAgentKeys)
+		// extends and <preset>_model are read from agent frontmatter by generation
+		// (presets.resolveAgentExtends, presets.ResolveAgentModel).
+		add(claudeAgentKeys, []string{"extends"})
+		for _, name := range config.IndividualPresetNames() {
+			known[name+"_model"] = true
+		}
 	case kindCheck:
 		add(checkKeys)
 	case kindContext:

@@ -456,7 +456,8 @@ func TestExposureSection(t *testing.T) {
 	}{
 		{"full table", head + "[exposure]\nharness = \"claude\"\ncontext_window = 200000\nplugins = \"enabled\"\nstart_budget = 0\ncollision_min_score = 0.2\n" + area + "[exposure.skill_areas]\ndeploy = \"billing\"\n", false},
 		{"areas file", head + "[exposure]\nareas_file = \"tools/areas.toml\"\n", false},
-		{"unknown harness", head + "[exposure]\nharness = \"codex\"\n", true},
+		{"codex harness", head + "[exposure]\nharness = \"codex\"\ncodex_start_budget = 5800\nmcp_server_tokens = 400\n", false},
+		{"unknown harness", head + "[exposure]\nharness = \"gemini\"\n", true},
 		{"unknown plugins mode", head + "[exposure]\nplugins = \"some\"\n", true},
 		{"score above one", head + "[exposure]\ncollision_min_score = 2\n", true},
 		{"area without a name", head + "[[exposure.areas]]\nowner = \"x\"\n", true},
@@ -507,10 +508,10 @@ func TestValidateFileConcurrentUseOfTheCachedSchema(t *testing.T) {
 	}
 }
 
-// Every schema file shipped in schema/ must be listed in docs/schema.md.
+// Every schema file shipped in schema/ must be listed in website/src/content/docs/schema.md.
 func TestDocsListEveryShippedSchema(t *testing.T) {
 	// Arrange
-	doc, err := os.ReadFile(filepath.Join("..", "docs", "schema.md"))
+	doc, err := os.ReadFile(filepath.Join("..", "website", "src", "content", "docs", "schema.md"))
 	require.NoError(t, err)
 	files, err := filepath.Glob("*.schema.json")
 	require.NoError(t, err)
@@ -518,6 +519,6 @@ func TestDocsListEveryShippedSchema(t *testing.T) {
 
 	// Act / Assert
 	for _, f := range files {
-		assert.Contains(t, string(doc), "schema/"+f, "docs/schema.md does not list schema/%s", f)
+		assert.Contains(t, string(doc), "schema/"+f, "website/src/content/docs/schema.md does not list schema/%s", f)
 	}
 }

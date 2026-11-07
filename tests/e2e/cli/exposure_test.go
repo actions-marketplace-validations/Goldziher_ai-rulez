@@ -224,7 +224,7 @@ func TestExposureFailures(t *testing.T) {
 		{"an invalid -C with --root", []string{"-C", "badcfg/config.toml", "exposure", "inventory", "--root", "empty"}, "AR9W5"},
 		{"a missing -C with --root", []string{"-C", "nope.toml", "exposure", "inventory", "--root", "empty"}, "does not exist"},
 		{"--with-text without json", []string{"exposure", "inventory", "--with-text"}, "--with-text applies to --format json"},
-		{"an unknown harness", []string{"exposure", "--harness", "codex"}, `unknown --harness "codex"`},
+		{"an unknown harness", []string{"exposure", "--harness", "gemini"}, `unknown --harness "gemini"`},
 		{"a negative context window", []string{"exposure", "--context-window", "-5"}, "--context-window must not be negative"},
 		{"an unknown subcommand", []string{"exposure", "inventroy"}, `unknown command "inventroy"`},
 	}
@@ -326,6 +326,38 @@ func TestExposureReport(t *testing.T) {
 			assert.NotContains(t, res.Stdout, `"start_tokens"`, sub)
 		}
 	})
+}
+
+func TestExposureCountsRootMCPConfigRegardlessOfGitIgnore(t *testing.T) {
+	env := newIsoEnv(t)
+	tests := []struct {
+		name   string
+		ignore string
+	}{
+		{name: "ignored", ignore: "/.mcp.json\n"},
+		{name: "listed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := minimalProject(t, "")
+			writeTree(t, root, map[string]string{
+				".gitignore": tt.ignore,
+				".mcp.json":  `{"mcpServers":{"local-tools":{"command":"unused-test-command"}}}`,
+			})
+			env.git(root, "init", "--quiet")
+
+			// Act
+			res := env.run(root, "exposure", "--harness", "claude", "--format", "json", "--mcp-server-tokens", "250")
+
+			// Assert
+			require.Equal(t, 0, res.ExitCode, res.Stderr)
+			doc := exposureReport(t, res.Stdout)
+			assert.Equal(t, 1, doc.CountsByPhaseAndKind["start"]["mcp_server"])
+			assert.Positive(t, doc.StartTokensByKind["mcp_server"])
+			assert.Equal(t, 250, doc.StartTokensByKind["mcp_schemas"])
+		})
+	}
 }
 
 func TestExposureStartBudget(t *testing.T) {

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/Goldziher/ai-rulez/main/schema/exposure-areas.v1.schema.json",
   "title": "ai-rulez exposure areas",
-  "description": "Output of `ai-rulez exposure areas --format json`: the area map as loaded and the area of every artifact of the session inventory, with how it was decided. See docs/exposure.md.",
+  "description": "Output of `ai-rulez exposure areas --format json`: the area map as loaded and the area of every artifact of the session inventory, with how it was decided. See https://goldziher.github.io/ai-rulez/exposure/.",
   "type": "object",
   "required": [
     "schema_version",
@@ -38,6 +38,11 @@
           "paths": { "type": "array", "items": { "type": "string" } },
           "terms": { "type": "array", "items": { "type": "string" } },
           "ambiguous": { "type": "array", "items": { "type": "string" } },
+          "exclude": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Compound names that contain a term of the area without naming it; absent when the area has none."
+          },
           "shared": { "type": "boolean" },
           "declare": { "type": "string" }
         }
@@ -62,7 +67,7 @@
         ],
         "additionalProperties": false,
         "properties": {
-          "kind": { "enum": ["claude_md", "rule", "skill", "agent", "mcp_server", "plugin", "settings"] },
+          "kind": { "enum": ["claude_md", "agents_md", "rule", "skill", "agent", "mcp_server", "plugin", "settings"] },
           "source": { "enum": ["file", "command", "plugin"] },
           "name": { "type": "string" },
           "qualified_name": { "type": "string" },

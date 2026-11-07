@@ -74,9 +74,9 @@ command = "uvx"
 args = ["mcp-grafana"]
 env = { GRAFANA_URL = "http://localhost:3000", GRAFANA_SERVICE_ACCOUNT_TOKEN = "${GRAFANA_SERVICE_ACCOUNT_TOKEN}" }
 
-[[roles]]                     # name, domains, skills/rules/agents/commands include+exclude, skill_mode, extends, match (docs/roles.md)
+[[roles]]                     # name, domains, skills/rules/agents/commands include+exclude, skill_mode, extends, match (https://goldziher.github.io/ai-rulez/roles/)
 [role_manifest]               # enabled = true writes .ai-rulez/roles.json
-[lock]                        # enforce, include_outputs, scope (docs/lockfile.md)
+[lock]                        # enforce, include_outputs, scope (https://goldziher.github.io/ai-rulez/lockfile/)
 ```
 
 ## Built-in Presets
@@ -104,7 +104,7 @@ These are 15 of the 52 built-in presets. The rest: `aiassistant`, `augment`, `bo
 `codewhale`, `commandcode`, `copilot-cli`, `cortex`, `crush`, `deepagents`, `dsh`, `factory`, `gitlab-duo`, `goose`,
 `grok`, `kilo`, `kimi`, `kiro`, `letta`, `mimocode`, `muse`, `omp`, `openclaw`, `poolside`, `qoder`, `qwen`,
 `reasonix`, `replit`, `rovodev`, `takt`, `trae`, `vibe`, `warp`, `zcode`, `zed`, `zoocode`. See
-`docs/harnesses.md` for the feature matrix. `windsurf` was renamed `devin`; `continue-dev` was removed.
+`https://goldziher.github.io/ai-rulez/harnesses/` for the feature matrix. `windsurf` was renamed `devin`; `continue-dev` was removed.
 
 ## Hooks and Permissions
 
@@ -121,8 +121,8 @@ ask   = ["Bash(git push:*)"]
 deny  = ["Read(./.env)"]
 ```
 
-Both use Claude Code names and syntax and are translated per harness (`docs/settings.md`, `docs/permissions.md`).
-`generate --user` renders a user config into home directories (`docs/user-scope.md`).
+Both use Claude Code names and syntax and are translated per harness (`https://goldziher.github.io/ai-rulez/settings/`, `https://goldziher.github.io/ai-rulez/permissions/`).
+`generate --user` renders a user config into home directories (`https://goldziher.github.io/ai-rulez/user-scope/`).
 
 ## Available Builtins
 
@@ -194,7 +194,7 @@ planned `--gitignore` patterns. Secret values are redacted before source-hash ca
 ## Config Directory and Generated Manifest
 
 - `.ai-rulez/` remains the default config root.
-- Config discovery also accepts the project-level `.config/` convention: `.config/ai-rulez/config.toml`. `.ai-rulez/` wins when both exist at the same level. Only version 5.0 TOML configurations are read. For a 4.x project, run `npx -y ai-rulez@latest migrate v5`; for older formats, follow the staged migration in [the v5 migration guide](https://github.com/Goldziher/ai-rulez/blob/main/docs/migration-v5.md).
+- Config discovery also accepts the project-level `.config/` convention: `.config/ai-rulez/config.toml`. `.ai-rulez/` wins when both exist at the same level. Only version 5.0 TOML configurations are read. For a 4.x project, run `npx -y ai-rulez@latest migrate v5`; for older formats, follow the staged migration in [the v5 migration guide](https://goldziher.github.io/ai-rulez/migration-v5/).
 - `ai-rulez init --config-dir .config/ai-rulez` scaffolds the `.config/` layout; generated outputs and the managed `.gitignore` block then reference `.config/ai-rulez/`.
 - `ai-rulez generate --config-dir <name>` and `validate --config-dir <name>` use another config directory (nested values such as `.config/ai-rulez` are supported).
 - `ai-rulez --config <path/to/config.toml> generate` loads that exact file.

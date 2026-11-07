@@ -4,11 +4,13 @@ import (
 	"context"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/Goldziher/ai-rulez/v5/internal/areas"
 	"github.com/Goldziher/ai-rulez/v5/internal/config"
 	"github.com/Goldziher/ai-rulez/v5/internal/exposure"
+	"github.com/Goldziher/ai-rulez/v5/internal/gitutil"
 	"github.com/Goldziher/ai-rulez/v5/internal/lint"
 	"github.com/Goldziher/ai-rulez/v5/internal/logger"
 )
@@ -25,22 +27,31 @@ type exposureLintSource struct {
 	areas     *areas.Map
 	areasFile string
 	plugins   exposure.PluginMode
-	cache     *exposureCache
+	// harness replaces [exposure] harness (`exposure leakage --harness`); "" follows the table.
+	harness string
+	cache   *exposureCache
 }
 
-// exposureCache holds the inventories an exposureLintSource built, by plugin mode, for the rules of one run.
-// The key is the mode alone because the source that owns the cache fixes the directory and the overrides; a
+// exposureCache holds the inventories an exposureLintSource built, by plugin mode and harness, for the rules of one run.
+// The key is the mode and harness because the source that owns the cache fixes the directory and the overrides; a
 // cache shared across sources would need them in the key. The area map is not cached: each rule that reads it
 // loads it again (AR9W5, the leakage and collision rules), which costs an areas_file read each.
 type exposureCache struct {
 	mu   sync.Mutex
-	invs map[exposure.PluginMode]*exposure.Inventory
+	invs map[exposureInvKey]*exposure.Inventory
+}
+
+// exposureInvKey is what an inventory of a source varies by.
+type exposureInvKey struct {
+	mode    exposure.PluginMode
+	harness string
 }
 
 // exposureLintOptions hands the exposure rules the project's session exposure when it has an [exposure] table.
-// The plugin analyzer reads it too: AR964 claude-skill-listing-total is one of its rows.
+// The plugin analyzer reads it too: AR964 claude-skill-listing-total is one of its rows, and the config analyzer
+// reports AR9I0 for a stale [[accept]] of the areas file.
 func exposureLintOptions(ctx context.Context, cfg *config.Config, sel []string) []lint.Option {
-	if cfg == nil || cfg.Exposure == nil || !lint.AnalyzerSelected(sel, lint.AnalyzerExposure, lint.AnalyzerPlugin) {
+	if cfg == nil || cfg.Exposure == nil || !lint.AnalyzerSelected(sel, lint.AnalyzerExposure, lint.AnalyzerPlugin, lint.AnalyzerConfig) {
 		return nil
 	}
 	return []lint.Option{lint.WithExposure(exposureLintSource{ctx: ctx, cfg: cfg, cache: &exposureCache{}})}
@@ -103,9 +114,23 @@ func (s exposureLintSource) mode() exposure.PluginMode {
 	return exposure.PluginMode(s.cfg.Exposure.EffectivePlugins())
 }
 
-// inventory builds the inventory of the source's directory in mode, once per mode when the source has a cache.
-// The path claims of the area map read the scopes relative to the project root.
+// effectiveHarness is the harness whose load model the leakage checks apply: --harness, else [exposure] harness,
+// else claude.
+func (s exposureLintSource) effectiveHarness() string {
+	if s.harness != "" {
+		return s.harness
+	}
+	return s.cfg.Exposure.EffectiveHarness()
+}
+
+// inventory builds the inventory of the source's directory in mode for the effective harness, once per mode when
+// the source has a cache. The path claims of the area map read the scopes relative to the project root.
 func (s exposureLintSource) inventory(mode exposure.PluginMode) (*exposure.Inventory, error) {
+	return s.inventoryFor(mode, s.effectiveHarness())
+}
+
+// inventoryFor is inventory for a harness's load model.
+func (s exposureLintSource) inventoryFor(mode exposure.PluginMode, harness string) (*exposure.Inventory, error) {
 	root, err := s.inventoryRoot()
 	if err != nil {
 		return nil, err
@@ -114,13 +139,14 @@ func (s exposureLintSource) inventory(mode exposure.PluginMode) (*exposure.Inven
 	if err != nil {
 		return nil, err
 	}
-	opts := exposure.Options{Root: root, AreaBase: base, Plugins: mode}
+	opts := exposure.Options{Root: root, AreaBase: base, Plugins: mode, Harness: harness}
 	if s.cache == nil {
 		return exposure.Build(s.ctx, opts) //nolint:wrapcheck // already contextual
 	}
+	key := exposureInvKey{mode, harness}
 	s.cache.mu.Lock()
 	defer s.cache.mu.Unlock()
-	if inv, ok := s.cache.invs[mode]; ok {
+	if inv, ok := s.cache.invs[key]; ok {
 		return inv, nil
 	}
 	inv, err := exposure.Build(s.ctx, opts)
@@ -128,16 +154,17 @@ func (s exposureLintSource) inventory(mode exposure.PluginMode) (*exposure.Inven
 		return nil, err //nolint:wrapcheck // already contextual
 	}
 	if s.cache.invs == nil {
-		s.cache.invs = map[exposure.PluginMode]*exposure.Inventory{}
+		s.cache.invs = map[exposureInvKey]*exposure.Inventory{}
 	}
-	s.cache.invs[mode] = inv
+	s.cache.invs[key] = inv
 	return inv, nil
 }
 
 // Leakage implements lint.ExposureSource: the leaks of the start-of-session artifacts (exposure.Leaks over
 // Inventory.Start, which fails closed), the start-of-session artifacts kept unread, whose text no rule can
-// check, and the skill_areas keys that name no skill. A key that misses under the plugin mode is looked up
-// again among the skills of every marketplace plugin, so a plugin that is not enabled still places its skills.
+// check, and the skill_areas keys that name no skill, all of the effective harness's inventory. A key that misses
+// under the plugin mode is looked up again among the skills of every marketplace plugin, so a plugin that is not
+// enabled still places its skills; Codex has no marketplace plugins, so there is nothing to look up again.
 func (s exposureLintSource) Leakage() (lint.ExposureLeakage, bool) {
 	m, file := s.areaMap()
 	if m == nil {
@@ -151,20 +178,25 @@ func (s exposureLintSource) Leakage() (lint.ExposureLeakage, bool) {
 	}
 	start := inv.Start()
 	out := lint.ExposureLeakage{Checked: len(start), AreasFile: file}
-	leaks := exposure.Leaks(start, m)
+	leaks, stale := exposure.CheckLeaksFrom(start, m, s.rootBelowBase())
 	for i := range leaks {
 		l := &leaks[i]
 		out.Leaks = append(out.Leaks, lint.ExposureLeak{
 			Ambiguous: l.Severity == exposure.LeakWarning, Area: l.Area, Term: l.Term, Kind: string(l.Kind), Name: l.Name,
-			Path: l.Path, Scope: l.Scope, Line: l.Line, Excerpt: l.Excerpt, Message: l.Message(),
+			Path: l.Path, Scope: l.Scope, Line: l.Line, Excerpt: l.Excerpt, Message: l.Message(), AcceptReason: l.Reason, ImportedBy: l.ImportedBy, ImportChain: l.ImportChain,
 		})
+	}
+	if s.judgesAcceptances() {
+		for _, a := range stale {
+			out.StaleAccepts = append(out.StaleAccepts, lint.ExposureStaleAccept{Index: a.Index, Term: a.Term, Path: a.Path, Line: a.Line})
+		}
 	}
 	for _, u := range exposure.UncheckedArtifacts(start) {
 		out.Unchecked = append(out.Unchecked, lint.ExposureUnchecked{Path: u.Path, Kind: string(u.Kind), Name: u.Name, Reason: u.Reason})
 	}
 	skillAreas := m.SkillAreas()
 	unknown := exposure.UnknownSkillAreas(skillAreas, inv)
-	if len(unknown) > 0 && mode != exposure.PluginsAll {
+	if len(unknown) > 0 && mode != exposure.PluginsAll && inv.Harness != config.ExposureHarnessCodex {
 		if all, err := s.inventory(exposure.PluginsAll); err == nil {
 			unknown = exposure.UnknownSkillAreas(skillAreas, all)
 		}
@@ -173,6 +205,36 @@ func (s exposureLintSource) Leakage() (lint.ExposureLeakage, bool) {
 		out.UnknownSkills = append(out.UnknownSkills, lint.ExposureSkillArea{Skill: key, Area: skillAreas[key]})
 	}
 	return out, true
+}
+
+// rootBelowBase is the inventory's directory relative to the project root, slash separated: "" for the root
+// itself or a directory outside it, whose paths no acceptance can name.
+func (s exposureLintSource) rootBelowBase() string {
+	root, err := s.inventoryRoot()
+	if err != nil {
+		return ""
+	}
+	base, err := s.base()
+	if err != nil {
+		return ""
+	}
+	rel := rootRelative(base, root)
+	if filepath.IsAbs(filepath.FromSlash(rel)) || rel == "." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
+	return rel
+}
+
+// judgesAcceptances reports whether the inventory covers the project root. The paths of the acceptances of an
+// areas file are relative to it, so one that accepts nothing in an inventory of a subdirectory (--root) says
+// nothing.
+func (s exposureLintSource) judgesAcceptances() bool {
+	root, err := s.inventoryRoot()
+	if err != nil {
+		return false
+	}
+	base, err := s.base()
+	return err == nil && gitutil.Resolve(root) == gitutil.Resolve(base)
 }
 
 // Inputs implements lint.ExposureSource: the absolute paths of the files besides the artifacts that decide
@@ -205,16 +267,16 @@ func (s exposureLintSource) Inputs() []string {
 	return out
 }
 
-// StartExposure implements lint.ExposureSource: the start-of-session report of `ai-rulez exposure` with the
+// StartExposure implements lint.ExposureSource: the start-of-session report of `ai-rulez exposure` for harness with the
 // [exposure] context_window, and the files of its start-of-session artifacts; nil when the inventory cannot be
 // built.
-func (s exposureLintSource) StartExposure() *lint.ExposureStart {
-	inv, err := s.inventory(s.mode())
+func (s exposureLintSource) StartExposure(harness string) *lint.ExposureStart {
+	inv, err := s.inventoryFor(s.mode(), harness)
 	if err != nil {
 		logger.Warn("Skipped the session exposure checks", "error", err)
 		return nil
 	}
-	rep := exposure.NewReport(inv, exposure.ReportOptions{ContextWindow: s.cfg.Exposure.EffectiveContextWindow(), StartBudget: s.cfg.Exposure.StartBudget})
+	rep := exposure.NewReport(inv, exposure.ReportOptions{ContextWindow: s.cfg.Exposure.EffectiveContextWindow(), StartBudget: s.cfg.Exposure.EffectiveStartBudget(harness), McpServerTokens: s.cfg.Exposure.McpServerTokens})
 	unmodeled := make([]string, 0, len(rep.StartImportsUnmodeled))
 	for _, u := range rep.StartImportsUnmodeled {
 		unmodeled = append(unmodeled, u.Import+" in "+u.Artifact+": "+u.Reason)
@@ -262,7 +324,7 @@ func (s exposureLintSource) Collisions(minScore float64) []lint.ExposureCollisio
 	if m == nil {
 		return nil
 	}
-	inv, err := s.inventory(s.mode())
+	inv, err := s.inventoryFor(s.mode(), config.ExposureHarnessClaude)
 	if err != nil {
 		logger.Warn("Skipped the session exposure collision checks", "error", err)
 		return nil

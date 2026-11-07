@@ -6,7 +6,10 @@ import (
 )
 
 // Values of [exposure] harness: the harness whose load model `exposure` applies.
-const ExposureHarnessClaude = "claude"
+const (
+	ExposureHarnessClaude = "claude"
+	ExposureHarnessCodex  = "codex"
+)
 
 // Values of [exposure] plugins: which plugin skills count as start-of-session skills.
 const (
@@ -28,13 +31,13 @@ const ExposureDefaultCollisionMinScore = 0.1
 const ExposureDefaultCollisionLimit = 20
 
 // ExposureConfig is the [exposure] table: what a session sees at start and the area map that names which part
-// of the repository an artifact belongs to (docs/exposure.md). The map is either inline ([[exposure.areas]] and
+// of the repository an artifact belongs to (https://goldziher.github.io/ai-rulez/exposure/). The map is either inline ([[exposure.areas]] and
 // [exposure.skill_areas]) or in areas_file, never both. Every key is optional; the rules that read the table are
 // inert without it.
 //
 //nolint:tagliatelle // config keys are snake_case by project convention
 type ExposureConfig struct {
-	// Harness is the harness whose load model applies; only "claude" (the default).
+	// Harness is the harness whose load model applies: "claude" (the default) or "codex".
 	Harness string `yaml:"harness,omitempty" json:"harness,omitempty" toml:"harness,omitempty"`
 	// ContextWindow is the model context window in tokens (default 200000).
 	ContextWindow int `yaml:"context_window,omitempty" json:"context_window,omitempty" toml:"context_window,omitempty"`
@@ -44,6 +47,11 @@ type ExposureConfig struct {
 	AreasFile string `yaml:"areas_file,omitempty" json:"areas_file,omitempty" toml:"areas_file,omitempty"`
 	// StartBudget is the most estimated start-of-session tokens allowed; 0 turns the check off.
 	StartBudget int `yaml:"start_budget,omitempty" json:"start_budget,omitempty" toml:"start_budget,omitempty"`
+	// CodexStartBudget is StartBudget for the codex harness (`exposure --harness codex`); 0 turns the check off.
+	CodexStartBudget int `yaml:"codex_start_budget,omitempty" json:"codex_start_budget,omitempty" toml:"codex_start_budget,omitempty"`
+	// McpServerTokens is the estimated tokens of the tool schemas one configured MCP server loads at start. Schemas
+	// need running servers, so the estimate is yours; 0 (default) leaves MCP schemas out of the start count.
+	McpServerTokens int `yaml:"mcp_server_tokens,omitempty" json:"mcp_server_tokens,omitempty" toml:"mcp_server_tokens,omitempty"`
 	// CollisionMinScore is the word overlap (0 to 1) at which two listings of different areas collide; 0 is off.
 	CollisionMinScore float64 `yaml:"collision_min_score,omitempty" json:"collision_min_score,omitempty" toml:"collision_min_score,omitempty"`
 	// Areas is the inline area map.
@@ -68,6 +76,9 @@ type ExposureArea struct {
 	Terms []string `yaml:"terms,omitempty" json:"terms,omitempty" toml:"terms,omitempty"`
 	// Ambiguous are words the area uses in its own sense that other areas use too; a term wins over them.
 	Ambiguous []string `yaml:"ambiguous,omitempty" json:"ambiguous,omitempty" toml:"ambiguous,omitempty"`
+	// Exclude are compound names that contain a term and do not name the area (an org `xberg-io` against the
+	// term `xberg`): an occurrence of one is blanked, case-insensitively, before the area's words are matched.
+	Exclude []string `yaml:"exclude,omitempty" json:"exclude,omitempty" toml:"exclude,omitempty"`
 	// Shared marks repository-wide tooling: its terms classify artifacts but never count as leakage.
 	Shared bool `yaml:"shared,omitempty" json:"shared,omitempty" toml:"shared,omitempty"`
 	// Declare is the repository path a session of this area declares it works on (context evals).
@@ -81,8 +92,8 @@ func (c *ExposureConfig) Validate() []string {
 		return nil
 	}
 	var problems []string
-	if c.Harness != "" && c.Harness != ExposureHarnessClaude {
-		problems = append(problems, fmt.Sprintf("exposure.harness %q must be %q", c.Harness, ExposureHarnessClaude))
+	if c.Harness != "" && c.Harness != ExposureHarnessClaude && c.Harness != ExposureHarnessCodex {
+		problems = append(problems, fmt.Sprintf("exposure.harness %q must be %q or %q", c.Harness, ExposureHarnessClaude, ExposureHarnessCodex))
 	}
 	switch c.Plugins {
 	case "", ExposurePluginsNone, ExposurePluginsEnabled, ExposurePluginsAll:
@@ -94,6 +105,12 @@ func (c *ExposureConfig) Validate() []string {
 	}
 	if c.StartBudget < 0 {
 		problems = append(problems, "exposure.start_budget must not be negative")
+	}
+	if c.CodexStartBudget < 0 {
+		problems = append(problems, "exposure.codex_start_budget must not be negative")
+	}
+	if c.McpServerTokens < 0 {
+		problems = append(problems, "exposure.mcp_server_tokens must not be negative")
 	}
 	if s := c.CollisionMinScore; s < 0 || s > 1 || math.IsNaN(s) {
 		problems = append(problems, fmt.Sprintf("exposure.collision_min_score must be between 0 and 1, got %v", s))
@@ -115,4 +132,23 @@ func (c *ExposureConfig) EffectivePlugins() string {
 		return ExposurePluginsEnabled
 	}
 	return c.Plugins
+}
+
+// EffectiveStartBudget is the start budget of a harness: codex_start_budget for codex, start_budget otherwise.
+func (c *ExposureConfig) EffectiveStartBudget(harness string) int {
+	switch {
+	case c == nil:
+		return 0
+	case harness == ExposureHarnessCodex:
+		return c.CodexStartBudget
+	}
+	return c.StartBudget
+}
+
+// EffectiveHarness is harness, or "claude" when it is unset.
+func (c *ExposureConfig) EffectiveHarness() string {
+	if c == nil || c.Harness == "" {
+		return ExposureHarnessClaude
+	}
+	return c.Harness
 }

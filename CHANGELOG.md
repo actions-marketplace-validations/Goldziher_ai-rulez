@@ -6,9 +6,79 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [Unreleased]
 
+## [5.11.1] - 2026-11-06
+
+### Fixed
+
+- `validate` no longer reports `AR303` for the agent frontmatter keys `extends` and `<preset>_model` (`claude_model`,
+  `codex_model`, ...), which generation reads; a misspelled preset prefix and the same keys on other kinds are still
+  reported.
+- `exposure leakage` and `AR9W0`, `AR9W1` and `AR9W6` check the Codex inventory (the root `AGENTS.md` and its imports,
+  `.agents/skills`, the MCP servers of `.codex/config.toml`) under `[exposure] harness = "codex"` or the new
+  `exposure leakage --harness codex`, instead of always reading `CLAUDE.md` and `.claude/`. `--plugins` other than
+  `none` is an error under codex, and the leakage schema accepts the `agents_md` kind
+  ([#545](https://github.com/Goldziher/ai-rulez/issues/545)).
+- The npm and PyPI packages ship their own README instead of a copy of the repository README, whose relative links
+  were broken on the registry pages.
+- `ai-rulez init --minimal` and the bundled `ai-rulez` skill link to the documentation site; their links to
+  `docs/*.md` on GitHub returned 404 after the site moved.
+- `ai-rulez local --help` names `config.local.toml`, the only overlay file read.
+- The documentation's GitHub Action examples pin the current release, and `set-version` keeps them in step.
+
+### Changed
+
+- Documentation: corrected the configuration reference (plugin runtimes default, effort and MCP self-entry presets,
+  builtin agents, provider-spec `emit_when`), the includes, roles, skills, checks, domains, monorepo, custom preset and
+  publish pages; removed maintainer and implementation detail from the architecture, performance, migration and
+  validation pages; fixed the pink tint of the light-theme cards and the home page title.
+- The npm and PyPI package descriptions, keywords and classifiers are shorter and match the project description.
+
+## [5.11.0] - 2026-11-06
+
+### Added
+
+- **`exposure` supports the Codex harness.** `ai-rulez exposure --harness codex` (or `[exposure] harness = "codex"`)
+  models Codex's start context instead of Claude Code's: the root `AGENTS.md` or `AGENTS.override.md` (one file per
+  directory, override first, each file capped at the 32 KiB `project_doc_max_bytes`), the `.agents/skills` listing with each
+  skill's path against Codex's 2% listing budget, and the MCP servers of `.codex/config.toml`. Claude-specific
+  artifacts do not count. The budget is its own key, `[exposure] codex_start_budget`, so one repository can gate both
+  harnesses; `AR9W3` follows `[exposure] harness` and its budget key, and `--plugins` other than `none` is an error
+  under codex. The other `exposure` subcommands stay on the Claude Code inventory ([#538](https://github.com/Goldziher/ai-rulez/issues/538)).
+- **`exposure` can count MCP tool schemas in the start budget.** `--mcp-server-tokens N` or
+  `[exposure] mcp_server_tokens = N` adds a fixed per-server estimate for each MCP server configured at start to
+  `start_tokens` and the budget check, reported on its own `mcp tool schemas` line and as `mcp_schemas` in the JSON and the by-kind breakdown. `AR9W3`
+  counts it too, and an explicit `--mcp-server-tokens 0` turns a configured estimate off. Off by default, so existing
+  numbers do not change
+  ([#539](https://github.com/Goldziher/ai-rulez/issues/539)).
+- An `[exposure]` area gains `exclude`, compound names that contain one of its terms without naming the area (an
+  org `xberg-io` against the term `xberg`). An areas file gains `[[accept]]` tables (`term`, `path`, `reason`,
+  optional `area`) that record known occurrences at session start; an entry that accepts nothing is reported as
+  `AR9I0` and fails `exposure leakage`. An area's `exclude` also applies to classification, and `exposure areas`
+  prints it. The `exposure areas` report gains the optional `exclude` key of an area, and `exposure leakage` the
+  optional `imported_by` key of a finding in an imported file (#536); both appear only when used, so a consumer of
+  schema v1 that sets `additionalProperties: false` sees new optional keys. (#537)
+
+### Fixed
+
+- `exposure leakage` and `AR9W0` scan the text of files a `CLAUDE.md` or rule imports with `@path`, as the start
+  budget already counts it, and report a leak against the imported file and its line. A `CLAUDE.md` of
+  `@AGENTS.md` is no longer exempt from the leakage checks. An import that is not read (over the read limit, an
+  absolute, home or outside-the-root path) is listed as unchecked. (#536)
+- The harness built-in name tables follow their sources again: the augment and claude extractors handle the
+  changed docs layout, Bob's modes (not slash commands) are dropped, and augment's list gains 18 names and loses 27,
+  so `AR808` and related rules report differently for augment configurations. The fetcher retries 429, 5xx and
+  timeouts. (#535)
+- `exposure` counts the MCP servers of a root `.mcp.json` that Git ignores, as Claude Code loads it either way; a
+  generated, ignored `.mcp.json` used to report no servers and no MCP start tokens. (#546)
+
 ### Changed
 
 - Python 3.11 is now the minimum supported version; Python 3.10 reached end of life.
+- The documentation site moved from zensical to Astro Starlight in `website/`, at the same URLs, and its pages were
+  rewritten. CLI help, hints and schemas link to the site instead of `docs/<page>.md`, and the site build writes
+  `llms.txt`, `llms-small.txt` and `llms-full.txt`.
+- Follow the xberg-io/toolchains v1.15.0 baseline (poly 0.32.5, uv 0.13.7) and upgrade Go dependencies, including
+  Liter 2.6.0, and the documentation site's, including Starlight 0.42.9.
 
 ## [5.10.0] - 2026-11-01
 

@@ -7,12 +7,15 @@ import sys
 from pathlib import Path
 
 PINNED_RELEASE = r"[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*"
+# The version input of a Goldziher/ai-rulez Action step, after any other inputs of its with: block.
+ACTION_PIN = (
+    rf"(Goldziher/ai-rulez(?:/[a-z]+)?@v[0-9]+\s*\n\s+with:\n(?:[ \t]+[\w-]+: .*\n)*?[ \t]+version: ){PINNED_RELEASE}()"
+)
 
 RULES = (
     ("cmd/commands/root.go", r'(?m)^(\s*Version\s*=\s*")[^"]+(")', "semver", True),
     ("cmd/ai-rulez/main.go", r'(?m)^(var version = ")[^"]+(")', "semver", True),
     ("release/npm/package.json", r'(?m)^(\s*"version": ")[^"]+(")', "semver", True),
-    ("pyproject.toml", r'(?m)^(version = ")[^"]+(")', "python", True),
     ("release/pypi/__init__.py", r'(?m)^(__version__ = ")[^"]+(")', "python", True),
     ("release/pypi/ai_rulez/__init__.py", r'(?m)^(__version__ = ")[^"]+(")', "python", True),
     ("internal/hooks/setup.go", r'(?m)^(\s*officialPreCommitRev\s*=\s*"v)[^"]+(")', "semver", True),
@@ -21,13 +24,19 @@ RULES = (
     ("README.md", rf'(revision = "v){PINNED_RELEASE}(")', "semver", False),
     ("poly-hooks.toml", rf"(ai-rulez@){PINNED_RELEASE}()", "semver", False),
     ("poly-hooks.toml", rf"(ai-rulez==){PINNED_RELEASE}()", "python", False),
-    ("docs/poly-hooks.md", rf"(ai-rulez@){PINNED_RELEASE}()", "semver", False),
-    ("docs/poly-hooks.md", rf"(ai-rulez==){PINNED_RELEASE}()", "python", False),
-    ("docs/poly-hooks.md", rf'(revision = "v){PINNED_RELEASE}(")', "semver", False),
-    ("docs/installation.md", rf"(ai-rulez version ){PINNED_RELEASE}()", "semver", False),
-    ("docs/installation.md", rf"(ai-rulez@){PINNED_RELEASE}()", "semver", False),
-    ("docs/installation.md", rf"(ai-rulez==){PINNED_RELEASE}()", "python", False),
-    ("docs/installation.md", rf"(rev: v){PINNED_RELEASE}()", "semver", False),
+    ("website/src/content/docs/poly-hooks.md", rf"(ai-rulez@){PINNED_RELEASE}()", "semver", False),
+    ("website/src/content/docs/poly-hooks.md", rf"(ai-rulez==){PINNED_RELEASE}()", "python", False),
+    ("website/src/content/docs/poly-hooks.md", rf'(revision = "v){PINNED_RELEASE}(")', "semver", False),
+    ("website/src/content/docs/installation.md", rf"(ai-rulez version ){PINNED_RELEASE}()", "semver", False),
+    ("website/src/content/docs/installation.md", rf"(ai-rulez@){PINNED_RELEASE}()", "semver", False),
+    ("website/src/content/docs/installation.md", rf"(ai-rulez==){PINNED_RELEASE}()", "python", False),
+    ("website/src/content/docs/installation.md", rf"(rev: v){PINNED_RELEASE}()", "semver", False),
+    # The `version:` input of the GitHub Action examples.
+    ("README.md", ACTION_PIN, "semver", False),
+    ("website/src/content/docs/installation.md", ACTION_PIN, "semver", False),
+    ("website/src/content/docs/github-actions.md", ACTION_PIN, "semver", False),
+    ("website/src/content/docs/approvals.md", ACTION_PIN, "semver", False),
+    ("website/src/content/docs/lockfile.md", ACTION_PIN, "semver", False),
 )
 
 
