@@ -106,7 +106,13 @@ jobs:
             echo "::error::tag $tag is not vX.Y.Z or vX.Y.Z-rc.N"
             exit 1
           fi
-          python_version="$(echo "$version" | sed 's/-rc\.//g; s/-rc/rc/')"
+          python_version="$(echo "$version" | sed -E 's/-rc\.([0-9]+)$/rc\1/')"
+          # A bad conversion once published 5.13.01 as a stable 5.13.1: the Python version must be the
+          # PEP 440 form of the tag and must equal what the committed wrapper reports.
+          if ! [[ "$python_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(rc[0-9]+)?$ ]]; then
+            echo "::error::python version $python_version is not X.Y.Z or X.Y.ZrcN"
+            exit 1
+          fi
           prerelease=false
           case "$version" in *-rc.*) prerelease=true ;; esac
 
@@ -587,13 +593,29 @@ jobs:
           cp LICENSE THIRD_PARTY_NOTICES.md release/npm/
           cp -R LICENSES release/npm/LICENSES
 
+      # The platform packages wrap the release binaries that the provenance job attested; the archives
+      # are checked against checksums.txt before anything is packaged.
+      - name: Download the release archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --dir dist \
+            --pattern 'ai-rulez_*.tar.gz' --pattern 'ai-rulez_*.zip' --pattern checksums.txt
+
+      - name: Build the platform packages
+        env:
+          RELEASE_VERSION: ${{ needs.meta.outputs.version }}
+        run: python3 -I scripts/release/package_npm.py --archives dist --version "$RELEASE_VERSION" --out npm-packages
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ""
           RELEASE_VERSION: ${{ needs.meta.outputs.version }}
         run: |
           unset NODE_AUTH_TOKEN
-          cd release/npm
           # The meta job already proved package.json equals the tag.
           version="$RELEASE_VERSION"
           if [[ "$version" == *"-rc."* ]]; then
@@ -602,6 +624,19 @@ jobs:
             npm_tag="latest"
           fi
 
+          # Platform packages first and the root package last: a partial failure never leaves a root
+          # whose optional dependencies are missing, and a rerun skips what is already published.
+          for dir in npm-packages/*-*; do
+            name="$(node -p "require('./$dir/package.json').name")"
+            if [ -n "$(pnpm view "$name@$version" version 2>/dev/null)" ]; then
+              echo "$name@$version is already published"
+              continue
+            fi
+            (cd "$dir" && pnpm publish --provenance --access public --tag "$npm_tag" --no-git-checks)
+          done
+
+          cp npm-packages/root/package.json release/npm/package.json
+          cd release/npm
           pnpm publish --provenance --access public --tag "$npm_tag" --no-git-checks
 
   publish_pypi:
@@ -611,7 +646,6 @@ jobs:
       ${{
         !cancelled() &&
         needs.meta.result == 'success' &&
-        needs.meta.outputs.pypi_exists != 'true' &&
         (needs.finalize_release.result == 'success' ||
          needs.finalize_release.result == 'skipped')
       }}
@@ -646,6 +680,28 @@ jobs:
           cp -R LICENSES release/pypi/LICENSES
           cd release/pypi
           pyproject-build
+
+      # Platform wheels wrap the attested release binaries after checking them against checksums.txt.
+      # The job has no pypi_exists gate: that flag turns true after a partial upload and would skip the
+      # missing files, while skip-existing below makes a rerun upload only what is absent.
+      # A rerun on a tag from before the packagers existed has no script to run; those releases already
+      # carry their PyPI files, and skip-existing covers the rest.
+      - name: Download the release archives
+        if: ${{ hashFiles('scripts/release/package_wheels.py') != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --dir dist \
+            --pattern 'ai-rulez_*.tar.gz' --pattern 'ai-rulez_*.zip' --pattern checksums.txt
+
+      - name: Build the platform wheels
+        if: ${{ hashFiles('scripts/release/package_wheels.py') != '' }}
+        env:
+          RELEASE_VERSION: ${{ needs.meta.outputs.version }}
+        run: python3 -I scripts/release/package_wheels.py --archives dist --version "$RELEASE_VERSION" --out release/pypi/dist
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.14.3

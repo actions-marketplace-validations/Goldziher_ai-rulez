@@ -12,7 +12,7 @@ ai-rulez version
 ```
 
 ```text
-ai-rulez version 5.12.1
+ai-rulez version 5.13.2
 ```
 
 ## Package managers
@@ -31,8 +31,9 @@ npm install -g ai-rulez
 pnpm add -g ai-rulez
 ```
 
-Requires Node.js 22 or newer. The package downloads the binary for your platform on first run and checks it
-against the release checksums.
+Requires Node.js 22 or newer. The binary for your platform comes from the npm registry as an optional
+`@ai-rulez/<os>-<cpu>` dependency. If that dependency is missing, the launcher downloads the binary on first run and
+checks it against the release checksums.
 
 **pip / pipx**
 
@@ -42,7 +43,8 @@ pipx install ai-rulez
 pip install ai-rulez
 ```
 
-Requires Python 3.11 or newer.
+Requires Python 3.11 or newer. Platform wheels carry the binary; without a matching wheel the launcher downloads it
+on first run and checks it against the release checksums.
 
 **uv**
 
@@ -61,8 +63,22 @@ pnpm dlx ai-rulez@latest generate
 uvx ai-rulez generate
 ```
 
-Pin a version (`npx ai-rulez@5.12.1`, `uvx --from ai-rulez==5.12.1 ai-rulez`) when a script or hook must not change
+Pin a version (`npx ai-rulez@5.13.2`, `uvx --from ai-rulez==5.13.2 ai-rulez`) when a script or hook must not change
 behavior between releases.
+
+## Restricted-network agents
+
+Sandboxed agent environments, such as Codex cloud environments, often have network access only during a setup phase.
+Installed releases that download their binary on first run fail in the agent phase if github.com is blocked. Install
+ai-rulez in the setup phase instead and call `ai-rulez` directly afterwards:
+
+```bash
+npm install --global ai-rulez@5.13.2   # pin the version you want
+ai-rulez --version                     # fetches the binary now, while the network is open
+```
+
+Set those commands as the environment's setup script. Avoid `npx ai-rulez@latest` in the agent phase: it resolves the
+newest version at run time, and a version newer than the one you installed has to be downloaded again.
 
 ## Go
 
@@ -134,7 +150,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/Goldziher/ai-rulez
-    rev: v5.12.1
+    rev: v5.13.2
     hooks:
       - id: ai-rulez-recursive
       - id: ai-rulez-validate
@@ -187,7 +203,7 @@ steps:
   - uses: actions/checkout@v7
   - uses: Goldziher/ai-rulez@v5
     with:
-      version: 5.12.1
+      version: 5.13.2
   - run: ai-rulez generate --check
   - run: ai-rulez validate
 ```
